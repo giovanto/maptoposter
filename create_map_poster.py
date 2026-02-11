@@ -492,6 +492,8 @@ def create_poster(
     name_label=None,
     display_city=None,
     display_country=None,
+    subtitle=None,
+    dates=None,
     fonts=None,
 ):
     """
@@ -524,7 +526,7 @@ def create_poster(
 
     # Progress bar for data fetching
     with tqdm(
-        total=3,
+        total=4,
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
@@ -557,6 +559,16 @@ def create_poster(
         )
         pbar.update(1)
 
+        # 4. Fetch Forests/Woodland
+        pbar.set_description("Downloading forests/woodland")
+        forests = fetch_features(
+            point,
+            compensated_dist,
+            tags={"landuse": "forest", "natural": "wood"},
+            name="forests",
+        )
+        pbar.update(1)
+
     print("✓ All data retrieved successfully!")
 
     # 2. Setup Plot
@@ -580,6 +592,19 @@ def create_poster(
             except Exception:
                 water_polys = water_polys.to_crs(g_proj.graph['crs'])
             water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
+
+    if forests is not None and not forests.empty:
+        # Filter to only polygon/multipolygon geometries
+        forests_polys = forests[forests.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not forests_polys.empty:
+            # Project forest features in the same CRS as the graph
+            try:
+                forests_polys = ox.projection.project_gdf(forests_polys)
+            except Exception:
+                forests_polys = forests_polys.to_crs(g_proj.graph['crs'])
+            # Use 'forests' color if in theme, otherwise use parks color
+            forest_color = THEME.get('forests', THEME['parks'])
+            forests_polys.plot(ax=ax, facecolor=forest_color, edgecolor='none', zorder=0.6)
 
     if parks is not None and not parks.empty:
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
@@ -620,9 +645,9 @@ def create_poster(
     scale_factor = min(height, width) / 12.0
 
     # Base font sizes (at 12 inches width)
-    base_main = 60
-    base_sub = 22
-    base_coords = 14
+    base_main = 72
+    base_sub = 27
+    base_coords = 18
     base_attr = 8
 
     # 4. Typography - use custom fonts if provided, otherwise use default FONTS
@@ -683,7 +708,7 @@ def create_poster(
     # --- BOTTOM TEXT ---
     ax.text(
         0.5,
-        0.14,
+        0.168,
         spaced_city,
         transform=ax.transAxes,
         color=THEME["text"],
@@ -694,7 +719,7 @@ def create_poster(
 
     ax.text(
         0.5,
-        0.10,
+        0.12,
         display_country.upper(),
         transform=ax.transAxes,
         color=THEME["text"],
@@ -702,6 +727,28 @@ def create_poster(
         fontproperties=font_sub,
         zorder=11,
     )
+
+    # Optional subtitle and dates
+    # Adjust y-positions based on what's present
+    if subtitle and dates:
+        # Both subtitle and dates
+        ax.text(0.5, 0.084, subtitle, transform=ax.transAxes, color=THEME["text"],
+                alpha=0.8, ha="center", fontproperties=font_coords, zorder=11)
+        ax.text(0.5, 0.06, dates, transform=ax.transAxes, color=THEME["text"],
+                alpha=0.6, ha="center", fontproperties=font_coords, zorder=11)
+        coords_y = 0.036
+    elif subtitle:
+        # Only subtitle
+        ax.text(0.5, 0.084, subtitle, transform=ax.transAxes, color=THEME["text"],
+                alpha=0.8, ha="center", fontproperties=font_coords, zorder=11)
+        coords_y = 0.054
+    elif dates:
+        # Only dates
+        ax.text(0.5, 0.084, dates, transform=ax.transAxes, color=THEME["text"],
+                alpha=0.6, ha="center", fontproperties=font_coords, zorder=11)
+        coords_y = 0.054
+    else:
+        coords_y = 0.084
 
     lat, lon = point
     coords = (
@@ -714,7 +761,7 @@ def create_poster(
 
     ax.text(
         0.5,
-        0.07,
+        coords_y,
         coords,
         transform=ax.transAxes,
         color=THEME["text"],
@@ -726,7 +773,7 @@ def create_poster(
 
     ax.plot(
         [0.4, 0.6],
-        [0.125, 0.125],
+        [0.15, 0.15],
         transform=ax.transAxes,
         color=THEME["text"],
         linewidth=1 * scale_factor,
@@ -944,6 +991,17 @@ Examples:
         help="Custom display name for country (for i18n support)",
     )
     parser.add_argument(
+        "--subtitle",
+        "-s",
+        type=str,
+        help="Optional subtitle below country name (e.g., 'Historic City Center')",
+    )
+    parser.add_argument(
+        "--dates",
+        type=str,
+        help="Optional date range (e.g., 'Dec 29-31, 2025')",
+    )
+    parser.add_argument(
         "--font-family",
         type=str,
         help='Google Fonts family name (e.g., "Noto Sans JP", "Open Sans"). If not specified, uses local Roboto fonts.',
@@ -1036,6 +1094,8 @@ Examples:
                 country_label=args.country_label,
                 display_city=args.display_city,
                 display_country=args.display_country,
+                subtitle=args.subtitle,
+                dates=args.dates,
                 fonts=custom_fonts,
             )
 
