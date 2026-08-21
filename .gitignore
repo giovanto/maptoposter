@@ -39,3 +39,7 @@ posters/
 
 # Personal batch drivers (never committed)
 local/
+
+# Personal data never enters the public repo
+create_overview_poster.py
+*.gpx
