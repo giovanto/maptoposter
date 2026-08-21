@@ -1081,10 +1081,11 @@ def create_poster(
     print(f"Saving to {output_file}...")
 
     fmt = output_format.lower()
+    # Fixed canvas: no tight-bbox trimming, so every poster in a series has
+    # exactly width*dpi x height*dpi pixels regardless of text or markers
     save_kwargs = dict(
         facecolor=THEME["bg"],
-        bbox_inches="tight",
-        pad_inches=0.05,
+        bbox_inches=None,
     )
 
     # DPI matters mainly for raster formats
