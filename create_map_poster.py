@@ -48,6 +48,12 @@ CACHE_DIR.mkdir(exist_ok=True)
 ox.settings.use_cache = True
 ox.settings.log_console = False
 
+# Alternate Overpass instance (e.g. https://overpass.kumi.systems/api/interpreter)
+# for when overpass-api.de rate-limits your IP
+if os.environ.get("OVERPASS_URL"):
+    ox.settings.overpass_url = os.environ["OVERPASS_URL"]
+    ox.settings.overpass_rate_limit = False  # mirrors don't expose slot status
+
 THEMES_DIR = "themes"
 FONTS_DIR = "fonts"
 POSTERS_DIR = "posters"
