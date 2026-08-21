@@ -33,3 +33,6 @@ test_venv/
 htmlcov/
 .coverage
 .pytest_cache/
+
+# Poster outputs (generated artwork stays local)
+posters/
