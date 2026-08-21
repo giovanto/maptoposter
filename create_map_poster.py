@@ -498,6 +498,7 @@ def create_poster(
     display_country=None,
     subtitle=None,
     dates=None,
+    line_scale=1.0,
     fonts=None,
 ):
     """
@@ -623,7 +624,7 @@ def create_poster(
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
     edge_colors = get_edge_colors_by_type(g_proj)
-    edge_widths = get_edge_widths_by_type(g_proj)
+    edge_widths = [w * line_scale for w in get_edge_widths_by_type(g_proj)]
 
     # Determine cropping limits to maintain the poster aspect ratio
     crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
@@ -1006,6 +1007,13 @@ Examples:
         help="Optional date range (e.g., 'Dec 29-31, 2025')",
     )
     parser.add_argument(
+        "--line-scale",
+        "-ls",
+        type=float,
+        default=1.0,
+        help="Multiplier for road line thickness (default: 1.0, try 2-4 for small areas)",
+    )
+    parser.add_argument(
         "--font-family",
         type=str,
         help='Google Fonts family name (e.g., "Noto Sans JP", "Open Sans"). If not specified, uses local Roboto fonts.',
@@ -1100,6 +1108,7 @@ Examples:
                 display_country=args.display_country,
                 subtitle=args.subtitle,
                 dates=args.dates,
+                line_scale=args.line_scale,
                 fonts=custom_fonts,
             )
 
