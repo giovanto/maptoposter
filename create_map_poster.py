@@ -658,6 +658,8 @@ def create_poster(
     points=None,
     gpx_path=None,
     show_title=True,
+    margin=False,
+    buildings=False,
     fonts=None,
 ):
     """
@@ -690,7 +692,7 @@ def create_poster(
 
     # Progress bar for data fetching
     with tqdm(
-        total=6,
+        total=6 + (1 if buildings else 0),
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
@@ -753,13 +755,29 @@ def create_poster(
         )
         pbar.update(1)
 
+        # 7. Fetch Buildings (optional figure-ground layer; heavy in dense cities)
+        building_footprints = None
+        if buildings:
+            pbar.set_description("Downloading building footprints")
+            building_footprints = fetch_features(
+                point,
+                compensated_dist,
+                tags={"building": True},
+                name="buildings",
+            )
+            pbar.update(1)
+
     print("✓ All data retrieved successfully!")
 
     # 2. Setup Plot
     print("Rendering map...")
     fig, ax = plt.subplots(figsize=(width, height), facecolor=THEME["bg"])
     ax.set_facecolor(THEME["bg"])
-    ax.set_position((0.0, 0.0, 1.0, 1.0))
+    if margin:
+        # Gallery-mat layout: map inset with paper margin, bottom-weighted
+        ax.set_position((0.11, 0.13, 0.78, 0.78))
+    else:
+        ax.set_position((0.0, 0.0, 1.0, 1.0))
 
     # Calculate scale factor based on smaller dimension (reference 12 inches)
     # This ensures text scales properly for both portrait and landscape orientations
@@ -824,6 +842,21 @@ def create_poster(
             except Exception:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
+
+    if building_footprints is not None and not building_footprints.empty:
+        bldg_polys = building_footprints[building_footprints.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not bldg_polys.empty:
+            try:
+                bldg_polys = ox.projection.project_gdf(bldg_polys)
+            except Exception:
+                bldg_polys = bldg_polys.to_crs(g_proj.graph['crs'])
+            # Theme 'buildings' color, else a 12% text-into-bg blend for a quiet figure-ground tone
+            bldg_color = THEME.get('buildings')
+            if not bldg_color:
+                bg_rgb = mcolors.to_rgb(THEME['bg'])
+                tx_rgb = mcolors.to_rgb(THEME['text'])
+                bldg_color = mcolors.to_hex(tuple(0.88 * b + 0.12 * t for b, t in zip(bg_rgb, tx_rgb)))
+            bldg_polys.plot(ax=ax, facecolor=bldg_color, edgecolor='none', zorder=0.9)
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
     edge_colors = get_edge_colors_by_type(g_proj)
@@ -946,9 +979,10 @@ def create_poster(
                     solid_capstyle='round', solid_joinstyle='round', zorder=8, alpha=0.9)
             print(f"✓ GPX route rendered ({len(trackpoints)} trackpoints)")
 
-    # Layer 3: Gradients (Top and Bottom)
-    create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
-    create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
+    # Layer 3: Gradients (Top and Bottom) — only for the classic full-bleed title layout
+    if show_title and not margin:
+        create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
+        create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
 
     # Base font sizes (at 12 inches width)
     base_main = 72
@@ -1063,19 +1097,33 @@ def create_poster(
     lat, lon = point
     lat_hemi = "N" if lat >= 0 else "S"
     lon_hemi = "E" if lon >= 0 else "W"
-    coords = f"{abs(lat):.4f}° {lat_hemi} / {abs(lon):.4f}° {lon_hemi}"
 
-    ax.text(
-        0.5,
-        coords_y,
-        coords,
-        transform=ax.transAxes,
-        color=THEME["text"],
-        alpha=0.7,
-        ha="center",
-        fontproperties=font_coords,
-        zorder=11,
-    )
+    if margin:
+        # Letter-spaced coordinates set in the mat below the map
+        lat_txt = " ".join(f"{abs(lat):.4f}°{lat_hemi}")
+        lon_txt = " ".join(f"{abs(lon):.4f}°{lon_hemi}")
+        fig.text(
+            0.5,
+            0.062,
+            f"{lat_txt}     {lon_txt}",
+            color=THEME["text"],
+            alpha=0.7,
+            ha="center",
+            fontproperties=font_coords,
+        )
+    else:
+        coords = f"{abs(lat):.4f}° {lat_hemi} / {abs(lon):.4f}° {lon_hemi}"
+        ax.text(
+            0.5,
+            coords_y,
+            coords,
+            transform=ax.transAxes,
+            color=THEME["text"],
+            alpha=0.7,
+            ha="center",
+            fontproperties=font_coords,
+            zorder=11,
+        )
 
     if show_title:
         ax.plot(
@@ -1093,18 +1141,38 @@ def create_poster(
     else:
         font_attr = FontProperties(family="monospace", size=8)
 
-    ax.text(
-        0.98,
-        0.02,
-        "© OpenStreetMap contributors",
-        transform=ax.transAxes,
-        color=THEME["text"],
-        alpha=0.5,
-        ha="right",
-        va="bottom",
-        fontproperties=font_attr,
-        zorder=11,
-    )
+    if margin:
+        # In the mat, right-aligned with the map's right edge
+        fig.text(
+            0.89,
+            0.025,
+            "© OpenStreetMap contributors",
+            color=THEME["text"],
+            alpha=0.5,
+            ha="right",
+            va="bottom",
+            fontproperties=font_attr,
+        )
+        # Hairline keyline around the map inset
+        fig.add_artist(plt.Rectangle(
+            (0.11, 0.13), 0.78, 0.78,
+            transform=fig.transFigure, fill=False,
+            edgecolor=THEME["text"], alpha=0.3,
+            linewidth=1 * scale_factor,
+        ))
+    else:
+        ax.text(
+            0.98,
+            0.02,
+            "© OpenStreetMap contributors",
+            transform=ax.transAxes,
+            color=THEME["text"],
+            alpha=0.5,
+            ha="right",
+            va="bottom",
+            fontproperties=font_attr,
+            zorder=11,
+        )
 
     # 5. Save
     print(f"Saving to {output_file}...")
@@ -1326,6 +1394,16 @@ Examples:
         help="Minimal layout: no city/country title block, coordinates only",
     )
     parser.add_argument(
+        "--margin",
+        action="store_true",
+        help="Gallery-mat layout: map inset with paper margin, letter-spaced coordinates below (implies --no-title)",
+    )
+    parser.add_argument(
+        "--buildings",
+        action="store_true",
+        help="Render OSM building footprints as a quiet figure-ground layer (heavier download)",
+    )
+    parser.add_argument(
         "--line-scale",
         "-ls",
         type=float,
@@ -1484,7 +1562,9 @@ Examples:
                 marks=marks_data,
                 points=points_data,
                 gpx_path=args.gpx,
-                show_title=not args.no_title,
+                show_title=not (args.no_title or args.margin),
+                margin=args.margin,
+                buildings=args.buildings,
                 fonts=custom_fonts,
             )
 
