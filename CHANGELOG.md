@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Community Contributions
 
+### Added (2026-08-21 — ports of open upstream PRs)
+- **Sea/ocean rendering from coastline** ([PR #193](https://github.com/originalankur/maptoposter/pull/193) by @utaysi) — polygonizes the viewport against OSM `natural=coastline` ways and classifies land/water by the OSM direction convention; coastal cities finally get their sea
+- **Line-mapped rivers** ([PR #227](https://github.com/originalankur/maptoposter/pull/227) by @gedankenstuecke) — `waterway=river` LineStrings drawn in the water color, width follows `--line-scale`; adapted to the cached `fetch_features` path
+- **`--mark <lat,lon> <Text> <position>`** ([PR #219](https://github.com/originalankur/maptoposter/pull/219) by @5H4DE) — repeatable point markers with text labels; label offset made viewport-relative, sizes follow the poster scale factor
+- **`--gpx <file>`** ([PR #224](https://github.com/originalankur/maptoposter/pull/224) by @tmchow) — travel route overlay; all themes gained a `route_color` key
+- **`--line-scale <f>`** ([PR #194](https://github.com/originalankur/maptoposter/pull/194) by @utaysi) — road thickness multiplier
+- **`--output-directory <dir>`** ([PR #152](https://github.com/originalankur/maptoposter/pull/152) by @fgtham)
+- **OSMnx response cache** ([PR #146](https://github.com/originalankur/maptoposter/pull/146) by @cbrunnkvist)
+
+### Fixed (2026-08-21)
+- **Coordinate footer for western/southern hemispheres** — showed a minus sign together with the hemisphere letter (e.g. `-75.5498° W`); now prints `75.5498° W`
+
 ### Added
 - **uv package manager support** ([PR #20](https://github.com/originalankur/maptoposter/pull/20))
   - Added `pyproject.toml` with project metadata and dependencies
