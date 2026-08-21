@@ -1,14 +1,21 @@
 [project]
 name = "maptoposter"
-version = "0.2.0"
-description = "Generate beautiful, minimalist map posters for any city in the world."
+version = "0.3.0"
+description = "Generate beautiful, minimalist map posters for any city in the world. Maintained fork with sea rendering, markers, and GPX routes."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Ankur Gupta", email = "originalankur@github.com"}
 ]
+maintainers = [
+    {name = "Giovanni Antoniazzi"}
+]
 keywords = ["map", "poster", "osm", "openstreetmap", "art", "visualization"]
+
+[project.urls]
+Repository = "https://github.com/giovanto/maptoposter"
+Upstream = "https://github.com/originalankur/maptoposter"
 
 dependencies = [
     "certifi==2026.1.4",
