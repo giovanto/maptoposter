@@ -13,10 +13,6 @@ maintainers = [
 ]
 keywords = ["map", "poster", "osm", "openstreetmap", "art", "visualization"]
 
-[project.urls]
-Repository = "https://github.com/giovanto/maptoposter"
-Upstream = "https://github.com/originalankur/maptoposter"
-
 dependencies = [
     "certifi==2026.1.4",
     "charset-normalizer==3.4.4",
@@ -49,6 +45,10 @@ dependencies = [
     "tzdata==2025.3",
     "urllib3==2.6.3",
 ]
+
+[project.urls]
+Repository = "https://github.com/giovanto/maptoposter"
+Upstream = "https://github.com/originalankur/maptoposter"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
