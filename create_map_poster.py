@@ -565,6 +565,39 @@ def build_sea_polygons(coastline_gdf, g_proj, crop_xlim, crop_ylim, center_lat_l
     return GeoDataFrame(geometry=water_polys, crs=crs)
 
 
+def _find_covering_cache(prefix: str, suffix: str, dist: float) -> str | None:
+    """
+    Find a cache key at the same center whose distance covers the request.
+
+    Cache keys embed the fetch distance; any cached entry at the same
+    lat/lon with dist >= requested is a superset of the requested area
+    (the axes crop trims the view), so it can be reused offline.
+
+    Args:
+        prefix: Key part before the distance (e.g. "graph_{lat}_{lon}_")
+        suffix: Key part after the distance ("" for graphs, "_{tags}" for features)
+        dist: Requested distance in meters
+
+    Returns:
+        The covering cache key with the smallest sufficient distance, or None
+    """
+    best = None
+    file_suffix = f"{suffix}.pkl"
+    for fname in os.listdir(CACHE_DIR):
+        if not (fname.startswith(prefix) and fname.endswith(file_suffix)):
+            continue
+        middle = fname[len(prefix):len(fname) - len(file_suffix)]
+        try:
+            cached_dist = float(middle)
+        except ValueError:
+            continue
+        if cached_dist >= dist and (best is None or cached_dist < best):
+            best = cached_dist
+    if best is None:
+        return None
+    return f"{prefix}{best}{suffix}"
+
+
 def fetch_graph(point, dist) -> MultiDiGraph | None:
     """
     Fetch street network graph from OpenStreetMap.
@@ -585,6 +618,13 @@ def fetch_graph(point, dist) -> MultiDiGraph | None:
     if cached is not None:
         print("✓ Using cached street network")
         return cast(MultiDiGraph, cached)
+
+    covering = _find_covering_cache(f"graph_{lat}_{lon}_", "", dist)
+    if covering:
+        cached = cache_get(covering)
+        if cached is not None:
+            print("✓ Using cached street network (larger cached area)")
+            return cast(MultiDiGraph, cached)
 
     try:
         g = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all', truncate_by_edge=True)
@@ -623,6 +663,13 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
     if cached is not None:
         print(f"✓ Using cached {name}")
         return cast(GeoDataFrame, cached)
+
+    covering = _find_covering_cache(f"{name}_{lat}_{lon}_", f"_{tag_str}", dist)
+    if covering:
+        cached = cache_get(covering)
+        if cached is not None:
+            print(f"✓ Using cached {name} (larger cached area)")
+            return cast(GeoDataFrame, cached)
 
     try:
         data = ox.features_from_point(point, tags=tags, dist=dist)
