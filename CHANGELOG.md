@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **OSMnx response cache** ([PR #146](https://github.com/originalankur/maptoposter/pull/146) by @cbrunnkvist)
 
 ### Fixed (2026-08-21)
-- **Coordinate footer for western/southern hemispheres** — showed a minus sign together with the hemisphere letter (e.g. `-75.5498° W`); now prints `75.5498° W`
+- **Coordinate footer for western/southern hemispheres** — showed a minus sign together with the hemisphere letter (e.g. `-74.0060° W`); now prints `74.0060° W`
 
 ### Added
 - **uv package manager support** ([PR #20](https://github.com/originalankur/maptoposter/pull/20))
