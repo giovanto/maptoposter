@@ -1033,13 +1033,9 @@ def create_poster(
         coords_y = 0.084
 
     lat, lon = point
-    coords = (
-        f"{lat:.4f}° N / {lon:.4f}° E"
-        if lat >= 0
-        else f"{abs(lat):.4f}° S / {lon:.4f}° E"
-    )
-    if lon < 0:
-        coords = coords.replace("E", "W")
+    lat_hemi = "N" if lat >= 0 else "S"
+    lon_hemi = "E" if lon >= 0 else "W"
+    coords = f"{abs(lat):.4f}° {lat_hemi} / {abs(lon):.4f}° {lon_hemi}"
 
     ax.text(
         0.5,
