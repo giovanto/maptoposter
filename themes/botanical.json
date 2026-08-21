@@ -1,0 +1,22 @@
+{
+  "name": "Botanical",
+  "description": "Nature-forward: saturated sage parks and pine forests lead, roads recede to quiet clay on warm paper",
+  "bg": "#F7F3EA",
+  "text": "#3A4F41",
+  "gradient_color": "#F7F3EA",
+  "water": "#8FBFC9",
+  "parks": "#C6D8B0",
+  "forests": "#A8C494",
+  "buildings": "#E9E0D2",
+  "road_motorway": "#8A6A52",
+  "road_primary": "#9C7B62",
+  "road_secondary": "#B49478",
+  "road_tertiary": "#C7AD96",
+  "road_residential": "#DCC9B8",
+  "road_default": "#C7AD96",
+  "route_color": "#C44536",
+  "mode_bike": "#2E7D4F",
+  "mode_walk": "#9BB8A0",
+  "mode_transit": "#C05B3C",
+  "mode_car": "#E0D6C4"
+}

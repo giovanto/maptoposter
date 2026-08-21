@@ -358,6 +358,45 @@ def get_edge_widths_by_type(g):
     return edge_widths
 
 
+def _mode_of_highway(highway):
+    """Classify an OSM highway value into a mobility mode."""
+    if isinstance(highway, list):
+        highway = highway[0] if highway else "unclassified"
+    if highway in ("cycleway",):
+        return "bike"
+    if highway in ("footway", "pedestrian", "path", "steps", "track", "bridleway", "living_street"):
+        return "walk"
+    if highway in ("busway", "bus_guideway"):
+        return "transit"
+    return "car"
+
+
+def get_edge_colors_mobility(g):
+    """
+    Color edges by mobility mode: sustainable modes lead, car network recedes.
+    """
+    bike = THEME.get("mode_bike", "#2E7D4F")
+    walk = THEME.get("mode_walk", "#9BB8A0")
+    transit = THEME.get("mode_transit", "#C05B3C")
+    car = THEME.get("mode_car")
+    if not car:
+        bg_rgb = mcolors.to_rgb(THEME["bg"])
+        tx_rgb = mcolors.to_rgb(THEME["text"])
+        car = mcolors.to_hex(tuple(0.78 * b + 0.22 * t for b, t in zip(bg_rgb, tx_rgb)))
+    palette = {"bike": bike, "walk": walk, "transit": transit, "car": car}
+    return [palette[_mode_of_highway(d.get("highway", "unclassified"))]
+            for _u, _v, d in g.edges(data=True)]
+
+
+def get_edge_widths_mobility(g):
+    """
+    Width edges by mobility mode: bike/transit bold, walk light, car hairline.
+    """
+    widths = {"bike": 1.6, "walk": 0.7, "transit": 1.6, "car": 0.45}
+    return [widths[_mode_of_highway(d.get("highway", "unclassified"))]
+            for _u, _v, d in g.edges(data=True)]
+
+
 def get_coordinates(city, country):
     """
     Fetches coordinates for a given city and country using geopy.
@@ -707,6 +746,7 @@ def create_poster(
     show_title=True,
     margin=False,
     buildings=False,
+    mobility=False,
     fonts=None,
 ):
     """
@@ -739,7 +779,7 @@ def create_poster(
 
     # Progress bar for data fetching
     with tqdm(
-        total=6 + (1 if buildings else 0),
+        total=6 + (1 if buildings else 0) + (1 if mobility else 0),
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
@@ -811,6 +851,18 @@ def create_poster(
                 compensated_dist,
                 tags={"building": True},
                 name="buildings",
+            )
+            pbar.update(1)
+
+        # 8. Fetch tram/light-rail lines for the mobility layout
+        transit_rails = None
+        if mobility:
+            pbar.set_description("Downloading tram/light-rail lines")
+            transit_rails = fetch_features(
+                point,
+                compensated_dist,
+                tags={"railway": ["tram", "light_rail"]},
+                name="transit_rails",
             )
             pbar.update(1)
 
@@ -905,9 +957,14 @@ def create_poster(
                 bldg_color = mcolors.to_hex(tuple(0.88 * b + 0.12 * t for b, t in zip(bg_rgb, tx_rgb)))
             bldg_polys.plot(ax=ax, facecolor=bldg_color, edgecolor='none', zorder=0.9)
     # Layer 2: Roads with hierarchy coloring
-    print("Applying road hierarchy colors...")
-    edge_colors = get_edge_colors_by_type(g_proj)
-    edge_widths = [w * line_scale for w in get_edge_widths_by_type(g_proj)]
+    if mobility:
+        print("Applying mobility-mode colors (sustainable modes lead)...")
+        edge_colors = get_edge_colors_mobility(g_proj)
+        edge_widths = [w * line_scale for w in get_edge_widths_mobility(g_proj)]
+    else:
+        print("Applying road hierarchy colors...")
+        edge_colors = get_edge_colors_by_type(g_proj)
+        edge_widths = [w * line_scale for w in get_edge_widths_by_type(g_proj)]
 
     # Plot the projected graph and then apply the cropped limits
     ox.plot_graph(
@@ -921,6 +978,17 @@ def create_poster(
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
+
+    # Layer 2.3: Tram/light-rail overlay for the mobility layout
+    if mobility and transit_rails is not None and not transit_rails.empty:
+        rail_lines = transit_rails[transit_rails.geometry.type.isin(["LineString", "MultiLineString"])]
+        if not rail_lines.empty:
+            try:
+                rail_lines = ox.projection.project_gdf(rail_lines)
+            except Exception:
+                rail_lines = rail_lines.to_crs(g_proj.graph['crs'])
+            rail_lines.plot(ax=ax, color=THEME.get("mode_transit", "#C05B3C"),
+                            linewidth=1.8 * line_scale, zorder=2.5, alpha=0.95)
 
     # Layer 2.4: Plain ring markers (no label) — for minimal/series layouts
     if points:
@@ -1451,6 +1519,11 @@ Examples:
         help="Render OSM building footprints as a quiet figure-ground layer (heavier download)",
     )
     parser.add_argument(
+        "--mobility",
+        action="store_true",
+        help="Sustainable-mobility layout: cycleways/footpaths/transit lead, car network recedes; adds tram/light-rail overlay",
+    )
+    parser.add_argument(
         "--line-scale",
         "-ls",
         type=float,
@@ -1612,6 +1685,7 @@ Examples:
                 show_title=not (args.no_title or args.margin),
                 margin=args.margin,
                 buildings=args.buildings,
+                mobility=args.mobility,
                 fonts=custom_fonts,
             )
 
