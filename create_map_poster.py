@@ -755,6 +755,8 @@ def create_poster(
     margin=False,
     buildings=False,
     mobility=False,
+    icon_path=None,
+    icon_size=None,
     fonts=None,
 ):
     """
@@ -1000,8 +1002,14 @@ def create_poster(
             rail_lines.plot(ax=ax, color=THEME.get("mode_transit", "#C05B3C"),
                             linewidth=1.8 * line_scale, zorder=2.5, alpha=0.95)
 
-    # Layer 2.4: Plain ring markers (no label) — for minimal/series layouts
+    # Layer 2.4: Plain ring markers or a custom image icon — for minimal/series layouts
     if points:
+        icon_img = None
+        if icon_path:
+            try:
+                icon_img = plt.imread(icon_path)
+            except Exception as e:
+                print(f"⚠ Warning: could not load icon '{icon_path}': {e}")
         for pt_lat, pt_lon in points:
             try:
                 pt = ox.projection.project_geometry(
@@ -1009,10 +1017,24 @@ def create_poster(
                     crs="EPSG:4326",
                     to_crs=g_proj.graph["crs"]
                 )[0]
-                ax.scatter(pt.x, pt.y, s=340 * scale_factor**2, facecolor=THEME["bg"],
-                           edgecolor=THEME["text"], linewidth=2.5 * scale_factor, zorder=9)
-                ax.scatter(pt.x, pt.y, s=90 * scale_factor**2, color=THEME["text"], zorder=9.1)
-                print(f"✓ Added point marker at ({pt_lat}, {pt_lon})")
+                if icon_img is not None:
+                    # Icon sized in ground meters: identical physical size across a
+                    # same-scale series. Bottom edge anchored at the point.
+                    win_w = crop_xlim[1] - crop_xlim[0]
+                    w = icon_size if icon_size else 0.10 * win_w
+                    h = w * icon_img.shape[0] / icon_img.shape[1]
+                    ax.imshow(
+                        icon_img,
+                        extent=(pt.x - w / 2, pt.x + w / 2, pt.y, pt.y + h),
+                        zorder=9.5,
+                        interpolation="lanczos",
+                    )
+                    print(f"✓ Added icon at ({pt_lat}, {pt_lon}), {w:.0f}m wide")
+                else:
+                    ax.scatter(pt.x, pt.y, s=340 * scale_factor**2, facecolor=THEME["bg"],
+                               edgecolor=THEME["text"], linewidth=2.5 * scale_factor, zorder=9)
+                    ax.scatter(pt.x, pt.y, s=90 * scale_factor**2, color=THEME["text"], zorder=9.1)
+                    print(f"✓ Added point marker at ({pt_lat}, {pt_lon})")
             except Exception as e:
                 print(f"⚠ Warning: Could not plot point: {e}")
 
@@ -1514,6 +1536,16 @@ Examples:
         help="Plain ring marker without label: --point <lat,lon> (repeatable)",
     )
     parser.add_argument(
+        "--icon",
+        type=str,
+        help="PNG image (with alpha) drawn at each --point instead of the ring",
+    )
+    parser.add_argument(
+        "--icon-size",
+        type=float,
+        help="Icon width in ground meters (default: 10%% of the map window width)",
+    )
+    parser.add_argument(
         "--no-title",
         action="store_true",
         help="Minimal layout: no city/country title block, coordinates only",
@@ -1696,6 +1728,8 @@ Examples:
                 margin=args.margin,
                 buildings=args.buildings,
                 mobility=args.mobility,
+                icon_path=args.icon,
+                icon_size=args.icon_size,
                 fonts=custom_fonts,
             )
 
