@@ -1,0 +1,30 @@
+{
+  "name": "Herbarium",
+  "description": "Warm-paper botanical — fern-canopy greens lead, clay roads flattened to texture (Olive Grove / Fern Canopy palettes)",
+  "bg": "#F1EAD6",
+  "text": "#3A2F2A",
+  "gradient_color": "#F1EAD6",
+  "water": "#A8C4C4",
+  "parks": "#9DBB7A",
+  "forests": "#2F5D3A",
+  "buildings": "#C9C4A2",
+  "buildings_edge": "#3A2F2A",
+  "road_motorway": "#8B6B4F",
+  "road_primary": "#B08A6A",
+  "road_secondary": "#C9BBAA",
+  "road_tertiary": "#D3C7B4",
+  "road_residential": "#D9CFC2",
+  "road_default": "#C9BBAA",
+  "road_widths": {
+    "motorway": 0.9,
+    "primary": 0.8,
+    "secondary": 0.7,
+    "tertiary": 0.6,
+    "default": 0.5
+  },
+  "route_color": "#B03A48",
+  "mode_bike": "#E2B13C",
+  "mode_walk": "#6F7D3B",
+  "mode_transit": "#D57835",
+  "mode_car": "#E0D6C4"
+}

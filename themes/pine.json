@@ -1,0 +1,22 @@
+{
+  "name": "Pine on Paper",
+  "description": "Light forest — proven green road ramp on warmed paper, deep pine anchor (Acadia / Cavalcanti palettes)",
+  "bg": "#F9F5EA",
+  "text": "#02401B",
+  "gradient_color": "#F9F5EA",
+  "water": "#A4BED5",
+  "parks": "#D4E8D4",
+  "forests": "#72874E",
+  "buildings": "#DFDED3",
+  "road_motorway": "#2D4A3E",
+  "road_primary": "#3D6B55",
+  "road_secondary": "#5A8A70",
+  "road_tertiary": "#7AAA90",
+  "road_residential": "#A0C8B0",
+  "road_default": "#5A8A70",
+  "route_color": "#972D15",
+  "mode_bike": "#548F01",
+  "mode_walk": "#81A88D",
+  "mode_transit": "#972D15",
+  "mode_car": "#E3E0D2"
+}

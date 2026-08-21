@@ -335,6 +335,14 @@ def get_edge_widths_by_type(g):
     """
     edge_widths = []
 
+    # Themes may override the width ramp (e.g. flatten it so roads read as texture)
+    ramp = THEME.get("road_widths", {})
+    w_motorway = ramp.get("motorway", 1.2)
+    w_primary = ramp.get("primary", 1.0)
+    w_secondary = ramp.get("secondary", 0.8)
+    w_tertiary = ramp.get("tertiary", 0.6)
+    w_default = ramp.get("default", 0.4)
+
     for _u, _v, data in g.edges(data=True):
         highway = data.get('highway', 'unclassified')
 
@@ -343,15 +351,15 @@ def get_edge_widths_by_type(g):
 
         # Assign width based on road importance
         if highway in ["motorway", "motorway_link"]:
-            width = 1.2
+            width = w_motorway
         elif highway in ["trunk", "trunk_link", "primary", "primary_link"]:
-            width = 1.0
+            width = w_primary
         elif highway in ["secondary", "secondary_link"]:
-            width = 0.8
+            width = w_secondary
         elif highway in ["tertiary", "tertiary_link"]:
-            width = 0.6
+            width = w_tertiary
         else:
-            width = 0.4
+            width = w_default
 
         edge_widths.append(width)
 
@@ -955,7 +963,9 @@ def create_poster(
                 bg_rgb = mcolors.to_rgb(THEME['bg'])
                 tx_rgb = mcolors.to_rgb(THEME['text'])
                 bldg_color = mcolors.to_hex(tuple(0.88 * b + 0.12 * t for b, t in zip(bg_rgb, tx_rgb)))
-            bldg_polys.plot(ax=ax, facecolor=bldg_color, edgecolor='none', zorder=0.9)
+            bldg_polys.plot(ax=ax, facecolor=bldg_color,
+                            edgecolor=THEME.get('buildings_edge', 'none'),
+                            linewidth=0.3, zorder=0.9)
     # Layer 2: Roads with hierarchy coloring
     if mobility:
         print("Applying mobility-mode colors (sustainable modes lead)...")
