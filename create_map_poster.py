@@ -655,7 +655,9 @@ def create_poster(
     dates=None,
     line_scale=1.0,
     marks=None,
+    points=None,
     gpx_path=None,
+    show_title=True,
     fonts=None,
 ):
     """
@@ -840,6 +842,22 @@ def create_poster(
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
 
+    # Layer 2.4: Plain ring markers (no label) — for minimal/series layouts
+    if points:
+        for pt_lat, pt_lon in points:
+            try:
+                pt = ox.projection.project_geometry(
+                    Point(pt_lon, pt_lat),
+                    crs="EPSG:4326",
+                    to_crs=g_proj.graph["crs"]
+                )[0]
+                ax.scatter(pt.x, pt.y, s=340 * scale_factor**2, facecolor=THEME["bg"],
+                           edgecolor=THEME["text"], linewidth=2.5 * scale_factor, zorder=9)
+                ax.scatter(pt.x, pt.y, s=90 * scale_factor**2, color=THEME["text"], zorder=9.1)
+                print(f"✓ Added point marker at ({pt_lat}, {pt_lon})")
+            except Exception as e:
+                print(f"⚠ Warning: Could not plot point: {e}")
+
     # Layer 2.5: Custom markers with text labels
     if marks:
         for mark_lat, mark_lon, mark_text, mark_pos in marks:
@@ -994,49 +1012,53 @@ def create_poster(
         )
 
     # --- BOTTOM TEXT ---
-    ax.text(
-        0.5,
-        0.168,
-        spaced_city,
-        transform=ax.transAxes,
-        color=THEME["text"],
-        ha="center",
-        fontproperties=font_main_adjusted,
-        zorder=11,
-    )
+    if show_title:
+        ax.text(
+            0.5,
+            0.168,
+            spaced_city,
+            transform=ax.transAxes,
+            color=THEME["text"],
+            ha="center",
+            fontproperties=font_main_adjusted,
+            zorder=11,
+        )
 
-    ax.text(
-        0.5,
-        0.12,
-        display_country.upper(),
-        transform=ax.transAxes,
-        color=THEME["text"],
-        ha="center",
-        fontproperties=font_sub,
-        zorder=11,
-    )
+        ax.text(
+            0.5,
+            0.12,
+            display_country.upper(),
+            transform=ax.transAxes,
+            color=THEME["text"],
+            ha="center",
+            fontproperties=font_sub,
+            zorder=11,
+        )
 
-    # Optional subtitle and dates
-    # Adjust y-positions based on what's present
-    if subtitle and dates:
-        # Both subtitle and dates
-        ax.text(0.5, 0.084, subtitle, transform=ax.transAxes, color=THEME["text"],
-                alpha=0.8, ha="center", fontproperties=font_coords, zorder=11)
-        ax.text(0.5, 0.06, dates, transform=ax.transAxes, color=THEME["text"],
-                alpha=0.6, ha="center", fontproperties=font_coords, zorder=11)
-        coords_y = 0.036
-    elif subtitle:
-        # Only subtitle
-        ax.text(0.5, 0.084, subtitle, transform=ax.transAxes, color=THEME["text"],
-                alpha=0.8, ha="center", fontproperties=font_coords, zorder=11)
-        coords_y = 0.054
-    elif dates:
-        # Only dates
-        ax.text(0.5, 0.084, dates, transform=ax.transAxes, color=THEME["text"],
-                alpha=0.6, ha="center", fontproperties=font_coords, zorder=11)
-        coords_y = 0.054
+        # Optional subtitle and dates
+        # Adjust y-positions based on what's present
+        if subtitle and dates:
+            # Both subtitle and dates
+            ax.text(0.5, 0.084, subtitle, transform=ax.transAxes, color=THEME["text"],
+                    alpha=0.8, ha="center", fontproperties=font_coords, zorder=11)
+            ax.text(0.5, 0.06, dates, transform=ax.transAxes, color=THEME["text"],
+                    alpha=0.6, ha="center", fontproperties=font_coords, zorder=11)
+            coords_y = 0.036
+        elif subtitle:
+            # Only subtitle
+            ax.text(0.5, 0.084, subtitle, transform=ax.transAxes, color=THEME["text"],
+                    alpha=0.8, ha="center", fontproperties=font_coords, zorder=11)
+            coords_y = 0.054
+        elif dates:
+            # Only dates
+            ax.text(0.5, 0.084, dates, transform=ax.transAxes, color=THEME["text"],
+                    alpha=0.6, ha="center", fontproperties=font_coords, zorder=11)
+            coords_y = 0.054
+        else:
+            coords_y = 0.084
     else:
-        coords_y = 0.084
+        # Minimal layout: coordinates are the only typography
+        coords_y = 0.05
 
     lat, lon = point
     lat_hemi = "N" if lat >= 0 else "S"
@@ -1055,14 +1077,15 @@ def create_poster(
         zorder=11,
     )
 
-    ax.plot(
-        [0.4, 0.6],
-        [0.15, 0.15],
-        transform=ax.transAxes,
-        color=THEME["text"],
-        linewidth=1 * scale_factor,
-        zorder=11,
-    )
+    if show_title:
+        ax.plot(
+            [0.4, 0.6],
+            [0.15, 0.15],
+            transform=ax.transAxes,
+            color=THEME["text"],
+            linewidth=1 * scale_factor,
+            zorder=11,
+        )
 
     # --- ATTRIBUTION (bottom right) ---
     if FONTS:
@@ -1293,6 +1316,16 @@ Examples:
         help="Mark a location: --mark <lat,lon> <Text> <position> (repeatable; positions: left/right/top/bottom/topleft/topright/bottomleft/bottomright)",
     )
     parser.add_argument(
+        "--point",
+        action="append",
+        help="Plain ring marker without label: --point <lat,lon> (repeatable)",
+    )
+    parser.add_argument(
+        "--no-title",
+        action="store_true",
+        help="Minimal layout: no city/country title block, coordinates only",
+    )
+    parser.add_argument(
         "--line-scale",
         "-ls",
         type=float,
@@ -1371,6 +1404,17 @@ Examples:
             sys.exit(1)
         themes_to_generate = [args.theme]
 
+    # Parse plain point markers
+    points_data = []
+    if args.point:
+        for pt_arg in args.point:
+            try:
+                lat_str, lon_str = pt_arg.split(",")
+                points_data.append((float(lat_str.strip()), float(lon_str.strip())))
+            except ValueError:
+                print("Error: --point expects <lat,lon>. Example: --point 40.71,-74.00")
+                sys.exit(1)
+
     # Parse Marker Arguments (support multiple marks)
     marks_data = []
     if args.mark:
@@ -1438,7 +1482,9 @@ Examples:
                 dates=args.dates,
                 line_scale=args.line_scale,
                 marks=marks_data,
+                points=points_data,
                 gpx_path=args.gpx,
+                show_title=not args.no_title,
                 fonts=custom_fonts,
             )
 
