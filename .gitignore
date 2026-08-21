@@ -36,3 +36,6 @@ htmlcov/
 
 # Poster outputs (generated artwork stays local)
 posters/
+
+# Personal batch drivers (never committed)
+local/
