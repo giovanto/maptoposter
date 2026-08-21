@@ -14,6 +14,7 @@ import os
 import pickle
 import sys
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -22,6 +23,7 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import osmnx as ox
+import pyproj
 from geopandas import GeoDataFrame
 from geopy.geocoders import Nominatim
 from lat_lon_parser import parse
@@ -147,6 +149,35 @@ def is_latin_script(text):
 
     # Consider it Latin if >80% of alphabetic characters are Latin
     return (latin_count / total_alpha) > 0.8
+
+
+def parse_gpx(gpx_path):
+    """
+    Parse a GPX file and extract trackpoints as (lat, lon) tuples.
+
+    Args:
+        gpx_path: Path to GPX file
+
+    Returns:
+        List of (lat, lon) tuples from <trkpt> elements
+    """
+    try:
+        tree = ET.parse(gpx_path)
+        root = tree.getroot()
+        namespace = "{http://www.topografix.com/GPX/1/1}"
+        trackpoints = []
+        for trkpt in root.findall(f".//{namespace}trkpt"):
+            lat = trkpt.attrib.get("lat")
+            lon = trkpt.attrib.get("lon")
+            if lat is not None and lon is not None:
+                trackpoints.append((float(lat), float(lon)))
+        return trackpoints
+    except FileNotFoundError:
+        print(f"✗ GPX file not found: {gpx_path}")
+        return []
+    except (ET.ParseError, ValueError) as e:
+        print(f"✗ Failed to parse GPX file '{gpx_path}': {e}")
+        return []
 
 
 def generate_output_filename(city, theme_name, output_format):
@@ -618,6 +649,7 @@ def create_poster(
     dates=None,
     line_scale=1.0,
     marks=None,
+    gpx_path=None,
     fonts=None,
 ):
     """
@@ -868,6 +900,27 @@ def create_poster(
                 print(f"✓ Added marker at ({mark_lat}, {mark_lon}) with text '{mark_text}' aligned '{mark_pos}'")
             except Exception as e:
                 print(f"⚠ Warning: Could not plot marker: {e}")
+
+    # Layer 2.7: GPX Route overlay
+    if gpx_path:
+        trackpoints = parse_gpx(gpx_path)
+        if trackpoints:
+            # The graph is in a projected CRS - transform lat/lon to the same CRS
+            crs_proj = g_proj.graph['crs']
+            transformer = pyproj.Transformer.from_crs("EPSG:4326", crs_proj, always_xy=True)
+
+            route_x = []
+            route_y = []
+            for lat, lon in trackpoints:
+                x, y = transformer.transform(lon, lat)
+                route_x.append(x)
+                route_y.append(y)
+
+            route_color = THEME.get('route_color', THEME.get('text', '#E74C3C'))
+            route_width = 5.0 * scale_factor
+            ax.plot(route_x, route_y, color=route_color, linewidth=route_width,
+                    solid_capstyle='round', solid_joinstyle='round', zorder=8, alpha=0.9)
+            print(f"✓ GPX route rendered ({len(trackpoints)} trackpoints)")
 
     # Layer 3: Gradients (Top and Bottom)
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
@@ -1261,6 +1314,11 @@ Examples:
         default=POSTERS_DIR,
         help=f"Output directory for the poster (default: {POSTERS_DIR})",
     )
+    parser.add_argument(
+        "--gpx",
+        type=str,
+        help="Path to a GPX file to overlay a travel route on the map",
+    )
 
     args = parser.parse_args()
 
@@ -1377,6 +1435,7 @@ Examples:
                 dates=args.dates,
                 line_scale=args.line_scale,
                 marks=marks_data,
+                gpx_path=args.gpx,
                 fonts=custom_fonts,
             )
 
