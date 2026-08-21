@@ -531,7 +531,7 @@ def create_poster(
 
     # Progress bar for data fetching
     with tqdm(
-        total=4,
+        total=5,
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
@@ -574,6 +574,16 @@ def create_poster(
         )
         pbar.update(1)
 
+        # 5. Fetch Rivers mapped as single lines (common for narrower city rivers)
+        pbar.set_description("Downloading rivers")
+        rivers = fetch_features(
+            point,
+            compensated_dist,
+            tags={"waterway": "river"},
+            name="rivers",
+        )
+        pbar.update(1)
+
     print("✓ All data retrieved successfully!")
 
     # 2. Setup Plot
@@ -597,6 +607,16 @@ def create_poster(
             except Exception:
                 water_polys = water_polys.to_crs(g_proj.graph['crs'])
             water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
+
+    if rivers is not None and not rivers.empty:
+        # Line geometries only: polygon riverbanks are already covered by the water layer
+        rivers_lines = rivers[rivers.geometry.type.isin(["LineString", "MultiLineString"])]
+        if not rivers_lines.empty:
+            try:
+                rivers_lines = ox.projection.project_gdf(rivers_lines)
+            except Exception:
+                rivers_lines = rivers_lines.to_crs(g_proj.graph['crs'])
+            rivers_lines.plot(ax=ax, color=THEME['water'], linewidth=1.5 * line_scale, zorder=0.5)
 
     if forests is not None and not forests.empty:
         # Filter to only polygon/multipolygon geometries
