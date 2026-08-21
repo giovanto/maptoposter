@@ -617,6 +617,7 @@ def create_poster(
     subtitle=None,
     dates=None,
     line_scale=1.0,
+    marks=None,
     fonts=None,
 ):
     """
@@ -720,6 +721,10 @@ def create_poster(
     ax.set_facecolor(THEME["bg"])
     ax.set_position((0.0, 0.0, 1.0, 1.0))
 
+    # Calculate scale factor based on smaller dimension (reference 12 inches)
+    # This ensures text scales properly for both portrait and landscape orientations
+    scale_factor = min(height, width) / 12.0
+
     # Project graph to a metric CRS so distances and aspect are linear (meters)
     g_proj = ox.project_graph(g)
 
@@ -797,13 +802,76 @@ def create_poster(
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
 
+    # Layer 2.5: Custom markers with text labels
+    if marks:
+        for mark_lat, mark_lon, mark_text, mark_pos in marks:
+            try:
+                # Project marker point to map CRS
+                mark_pt = ox.projection.project_geometry(
+                    Point(mark_lon, mark_lat),
+                    crs="EPSG:4326",
+                    to_crs=g_proj.graph["crs"]
+                )[0]
+
+                # Draw the marker
+                ax.plot(
+                    mark_pt.x,
+                    mark_pt.y,
+                    marker='o',
+                    color=THEME["text"],
+                    markersize=8 * scale_factor,
+                    zorder=9,
+                )
+
+                # Determine font for marker
+                active_marker_fonts = fonts or FONTS
+                if active_marker_fonts:
+                    font_marker = FontProperties(
+                        fname=active_marker_fonts["bold"], size=12 * scale_factor
+                    )
+                else:
+                    font_marker = FontProperties(
+                        family="monospace", weight="bold", size=12 * scale_factor
+                    )
+
+                # Label offset relative to the viewport so it holds at any --distance
+                offset_val = 0.04 * (crop_xlim[1] - crop_xlim[0])
+                pos_map = {
+                    'right':       (offset_val, 0, 'left', 'center'),
+                    'left':        (-offset_val, 0, 'right', 'center'),
+                    'top':         (0, offset_val, 'center', 'bottom'),
+                    'bottom':      (0, -offset_val, 'center', 'top'),
+                    'topright':    (offset_val, offset_val, 'left', 'bottom'),
+                    'topleft':     (-offset_val, offset_val, 'right', 'bottom'),
+                    'bottomright': (offset_val, -offset_val, 'left', 'top'),
+                    'bottomleft':  (-offset_val, -offset_val, 'right', 'top'),
+                }
+                dx, dy, ha, va = pos_map.get(mark_pos, pos_map['topright'])
+
+                # Draw the text label next to the marker
+                ax.text(
+                    mark_pt.x + dx,
+                    mark_pt.y + dy,
+                    mark_text,
+                    color=THEME["bg"],
+                    ha=ha,
+                    va=va,
+                    bbox=dict(
+                        facecolor=THEME["text"],
+                        alpha=0.8,
+                        edgecolor='none',
+                        boxstyle='round,pad=0.4',
+                    ),
+                    fontproperties=font_marker,
+                    zorder=10,
+                )
+                print(f"✓ Added marker at ({mark_lat}, {mark_lon}) with text '{mark_text}' aligned '{mark_pos}'")
+            except Exception as e:
+                print(f"⚠ Warning: Could not plot marker: {e}")
+
     # Layer 3: Gradients (Top and Bottom)
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
     create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
-
-    # Calculate scale factor based on smaller dimension (reference 12 inches)
-    # This ensures text scales properly for both portrait and landscape orientations
-    scale_factor = min(height, width) / 12.0
 
     # Base font sizes (at 12 inches width)
     base_main = 72
@@ -1163,6 +1231,12 @@ Examples:
         help="Optional date range (e.g., 'Dec 29-31, 2025')",
     )
     parser.add_argument(
+        "--mark",
+        nargs="+",
+        action="append",
+        help="Mark a location: --mark <lat,lon> <Text> <position> (repeatable; positions: left/right/top/bottom/topleft/topright/bottomleft/bottomright)",
+    )
+    parser.add_argument(
         "--line-scale",
         "-ls",
         type=float,
@@ -1236,6 +1310,33 @@ Examples:
             sys.exit(1)
         themes_to_generate = [args.theme]
 
+    # Parse Marker Arguments (support multiple marks)
+    marks_data = []
+    if args.mark:
+        valid_positions = ['left', 'right', 'top', 'bottom', 'topleft', 'topright', 'bottomleft', 'bottomright']
+        for mark_args in args.mark:
+            if len(mark_args) < 2:
+                print("Error: --mark requires coordinates and text. Example: --mark 40.71,-74.00 Custom Text topright")
+                sys.exit(1)
+            try:
+                lat_str, lon_str = mark_args[0].split(",")
+                mark_lat = float(lat_str.strip())
+                mark_lon = float(lon_str.strip())
+                last_arg = mark_args[-1].lower()
+                if last_arg in valid_positions:
+                    mark_pos = last_arg
+                    mark_text = " ".join(mark_args[1:-1])
+                else:
+                    mark_pos = "topright"
+                    mark_text = " ".join(mark_args[1:])
+                if not mark_text.strip():
+                    print("Error: --mark requires text. Example: --mark 40.71,-74.00 Custom Text topright")
+                    sys.exit(1)
+                marks_data.append((mark_lat, mark_lon, mark_text, mark_pos))
+            except ValueError:
+                print("Error: Coordinates for --mark must be separated by a comma. Example: 40.71,-74.00")
+                sys.exit(1)
+
     print("=" * 50)
     print("City Map Poster Generator")
     print("=" * 50)
@@ -1275,6 +1376,7 @@ Examples:
                 subtitle=args.subtitle,
                 dates=args.dates,
                 line_scale=args.line_scale,
+                marks=marks_data,
                 fonts=custom_fonts,
             )
 
