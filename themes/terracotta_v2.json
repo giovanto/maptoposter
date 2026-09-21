@@ -1,0 +1,23 @@
+{
+  "name": "Terracotta v2",
+  "description": "Mediterranean clay with figure-ground buildings and mode colours",
+  "bg": "#F5EDE4",
+  "text": "#8B4513",
+  "gradient_color": "#F5EDE4",
+  "water": "#A8C4C4",
+  "parks": "#E8E0D0",
+  "forests": "#C8D4B8",
+  "road_motorway": "#A0522D",
+  "road_primary": "#B8653A",
+  "road_secondary": "#C9846A",
+  "road_tertiary": "#D9A08A",
+  "road_residential": "#E5C4B0",
+  "road_default": "#D9A08A",
+  "route_color": "#2A6B5E",
+  "buildings": "#EDE2D4",
+  "buildings_edge": "#DCCBB8",
+  "mode_bike": "#2A6B5E",
+  "mode_walk": "#C9A08A",
+  "mode_transit": "#A0522D",
+  "mode_car": "#E5D5C4"
+}

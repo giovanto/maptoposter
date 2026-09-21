@@ -1,0 +1,30 @@
+{
+  "name": "Neon Cyberpunk v2",
+  "description": "Electric night city \u2014 Maas reads as lit water, parks hold dark teal mass",
+  "bg": "#0D0D1A",
+  "text": "#00FFFF",
+  "gradient_color": "#0D0D1A",
+  "water": "#0B2A3D",
+  "parks": "#10262A",
+  "road_motorway": "#FF00FF",
+  "road_primary": "#00FFFF",
+  "road_secondary": "#00C8C8",
+  "road_tertiary": "#0098A0",
+  "road_residential": "#006870",
+  "road_default": "#0098A0",
+  "route_color": "#FFFF00",
+  "forests": "#0E3038",
+  "buildings": "#12121F",
+  "buildings_edge": "#1E1E33",
+  "road_widths": {
+    "motorway": 0.9,
+    "primary": 0.9,
+    "secondary": 0.8,
+    "tertiary": 0.6,
+    "default": 0.45
+  },
+  "mode_bike": "#00FFAA",
+  "mode_walk": "#4A7A8A",
+  "mode_transit": "#FF00FF",
+  "mode_car": "#1A2A3A"
+}
