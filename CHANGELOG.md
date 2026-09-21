@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--point-scale <f>`**: multiplier for the `--point` ring marker (default 1.0)
 - **Theme iterations**: `terracotta_v2`, `midnight_blue_v2`, `neon_cyberpunk_v2`
 
+### Added (2026-09-21)
+- **`--edge-marks`**: a `--mark` outside the viewport is drawn as a direction stone on the frame edge, a triangle pointing at the real bearing plus the label and the true distance in km, instead of being silently clipped. Lets a tight same-scale series reference places far outside the frame.
+- **`--no-attribution`**: omits the OpenStreetMap credit. ODbL still requires attribution for any produced work you publish, distribute or sell; intended for private prints only.
+
+### Fixed (2026-09-21)
+- **`--icon` fringing**: icons were resampled by `imshow` with unpremultiplied alpha and a lanczos kernel, whose negative lobes ring at a hard silhouette and leave a stippled halo, worst when a large cutout is scaled far down. Icons are now resampled with premultiplied alpha to the exact target pixel size and drawn 1:1.
+
 ### Added
 - **uv package manager support** ([PR #20](https://github.com/originalankur/maptoposter/pull/20))
   - Added `pyproject.toml` with project metadata and dependencies

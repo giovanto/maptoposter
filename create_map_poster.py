@@ -10,6 +10,7 @@ high-quality poster-ready images with roads, water features, and parks.
 import argparse
 import asyncio
 import json
+import math
 import os
 import pickle
 import sys
@@ -761,6 +762,8 @@ def create_poster(
     no_gradient=False,
     title_scale=1.0,
     point_scale=1.0,
+    no_attribution=False,
+    edge_marks=False,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -1026,11 +1029,39 @@ def create_poster(
                     win_w = crop_xlim[1] - crop_xlim[0]
                     w = icon_size if icon_size else 0.10 * win_w
                     h = w * icon_img.shape[0] / icon_img.shape[1]
+                    # Resample the icon ourselves, with PREMULTIPLIED alpha. Letting
+                    # imshow do it unpremultiplied (especially with lanczos, whose
+                    # negative lobes ring on a hard silhouette) fringes the cutout.
+                    draw_img = icon_img
+                    if draw_img.shape[-1] == 4:
+                        arr = draw_img
+                        if arr.dtype != np.uint8:
+                            arr = (np.clip(arr, 0, 1) * 255).astype(np.uint8)
+                        ax_px_w = ax.get_position().width * fig.get_size_inches()[0] * 300
+                        target_px = max(16, int(round(ax_px_w * (w / win_w))))
+                        if arr.shape[1] > target_px:
+                            from PIL import Image as _Image
+                            al = arr[..., 3:4].astype(np.float32) / 255.0
+                            pm = np.dstack([
+                                (arr[..., :3].astype(np.float32) * al),
+                                arr[..., 3:4].astype(np.float32),
+                            ]).astype(np.uint8)
+                            th = max(16, int(round(target_px * arr.shape[0] / arr.shape[1])))
+                            sm = np.asarray(
+                                _Image.fromarray(pm, "RGBA").resize(
+                                    (target_px, th), _Image.LANCZOS
+                                )
+                            ).astype(np.float32)
+                            a2 = sm[..., 3:4] / 255.0
+                            rgb2 = np.divide(sm[..., :3], np.where(a2 == 0, 1.0, a2))
+                            draw_img = np.dstack([
+                                np.clip(rgb2, 0, 255), sm[..., 3:4]
+                            ]).astype(np.uint8)
                     ax.imshow(
-                        icon_img,
+                        draw_img,
                         extent=(pt.x - w / 2, pt.x + w / 2, pt.y, pt.y + h),
                         zorder=9.5,
-                        interpolation="lanczos",
+                        interpolation="antialiased",
                     )
                     print(f"✓ Added icon at ({pt_lat}, {pt_lon}), {w:.0f}m wide")
                 else:
@@ -1051,6 +1082,77 @@ def create_poster(
                     crs="EPSG:4326",
                     to_crs=g_proj.graph["crs"]
                 )[0]
+
+                inside = (
+                    crop_xlim[0] <= mark_pt.x <= crop_xlim[1]
+                    and crop_ylim[0] <= mark_pt.y <= crop_ylim[1]
+                )
+
+                if not inside and edge_marks:
+                    # Direction stone: clamp the mark to the frame edge, point at it,
+                    # and state how far away it really is.
+                    cx = (crop_xlim[0] + crop_xlim[1]) / 2
+                    cy = (crop_ylim[0] + crop_ylim[1]) / 2
+                    win_w = crop_xlim[1] - crop_xlim[0]
+                    win_h = crop_ylim[1] - crop_ylim[0]
+                    inset = 0.07 * win_w
+                    vx, vy = mark_pt.x - cx, mark_pt.y - cy
+                    t = min(
+                        (win_w / 2 - inset) / abs(vx) if vx else float("inf"),
+                        (win_h / 2 - inset) / abs(vy) if vy else float("inf"),
+                    )
+                    ex, ey = cx + vx * t, cy + vy * t
+                    angle = math.degrees(math.atan2(-vx, vy))
+
+                    _, _, ground = pyproj.Geod(ellps="WGS84").inv(
+                        point[1], point[0], mark_lon, mark_lat
+                    )
+
+                    edge_fonts = fonts or FONTS
+                    if edge_fonts:
+                        font_edge = FontProperties(
+                            fname=edge_fonts["bold"], size=11 * scale_factor
+                        )
+                    else:
+                        font_edge = FontProperties(
+                            family="monospace", weight="bold", size=11 * scale_factor
+                        )
+
+                    ax.plot(
+                        ex, ey,
+                        marker=(3, 0, angle),
+                        color=THEME["text"],
+                        markersize=12 * scale_factor,
+                        zorder=10,
+                    )
+
+                    norm = abs(vx) + abs(vy)
+                    off = 0.05 * win_w
+                    tx, ty = ex - vx / norm * off, ey - vy / norm * off
+                    if abs(vx) >= abs(vy):
+                        ha, va = ("right" if vx > 0 else "left"), "center"
+                    else:
+                        ha, va = "center", ("top" if vy > 0 else "bottom")
+
+                    ax.text(
+                        tx, ty,
+                        f"{mark_text} \u00b7 {ground / 1000:.1f} km",
+                        color=THEME["bg"],
+                        ha=ha, va=va,
+                        bbox=dict(
+                            facecolor=THEME["text"],
+                            alpha=0.8,
+                            edgecolor="none",
+                            boxstyle="round,pad=0.4",
+                        ),
+                        fontproperties=font_edge,
+                        zorder=10,
+                    )
+                    print(
+                        f"\u2192 Edge mark '{mark_text}' at {ground / 1000:.1f} km "
+                        f"(outside the frame, clamped to the border)"
+                    )
+                    continue
 
                 # Draw the marker
                 ax.plot(
@@ -1293,16 +1395,17 @@ def create_poster(
 
     if margin:
         # In the mat, right-aligned with the map's right edge
-        fig.text(
-            0.89,
-            0.025,
-            "© OpenStreetMap contributors",
-            color=THEME["text"],
-            alpha=0.5,
-            ha="right",
-            va="bottom",
-            fontproperties=font_attr,
-        )
+        if not no_attribution:
+            fig.text(
+                0.89,
+                0.025,
+                "© OpenStreetMap contributors",
+                color=THEME["text"],
+                alpha=0.5,
+                ha="right",
+                va="bottom",
+                fontproperties=font_attr,
+            )
         # Hairline keyline around the map inset
         fig.add_artist(plt.Rectangle(
             (0.11, 0.13), 0.78, 0.78,
@@ -1310,7 +1413,7 @@ def create_poster(
             edgecolor=THEME["text"], alpha=0.3,
             linewidth=1 * scale_factor,
         ))
-    else:
+    elif not no_attribution:
         ax.text(
             0.98,
             0.02,
@@ -1614,6 +1717,25 @@ Examples:
         help="Multiplier for --point ring marker size (default: 1.0)",
     )
     parser.add_argument(
+        "--edge-marks",
+        dest="edge_marks",
+        action="store_true",
+        help=(
+            "For --mark locations outside the frame: draw a direction arrow on the "
+            "frame edge with the label and real distance, instead of dropping them"
+        ),
+    )
+    parser.add_argument(
+        "--no-attribution",
+        dest="no_attribution",
+        action="store_true",
+        help=(
+            "Omit the '© OpenStreetMap contributors' credit. ODbL still requires "
+            "attribution for any produced work you publish, distribute or sell; use "
+            "this only for private prints."
+        ),
+    )
+    parser.add_argument(
         "--gpx",
         type=str,
         help="Path to a GPX file to overlay a travel route on the map",
@@ -1751,6 +1873,8 @@ Examples:
                 no_gradient=args.no_gradient,
                 title_scale=args.title_scale,
                 point_scale=args.point_scale,
+                no_attribution=args.no_attribution,
+                edge_marks=args.edge_marks,
                 margin=args.margin,
                 buildings=args.buildings,
                 mobility=args.mobility,
