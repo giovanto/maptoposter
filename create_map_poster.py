@@ -758,6 +758,9 @@ def create_poster(
     icon_path=None,
     icon_size=None,
     fonts=None,
+    no_gradient=False,
+    title_scale=1.0,
+    point_scale=1.0,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -1031,9 +1034,9 @@ def create_poster(
                     )
                     print(f"✓ Added icon at ({pt_lat}, {pt_lon}), {w:.0f}m wide")
                 else:
-                    ax.scatter(pt.x, pt.y, s=340 * scale_factor**2, facecolor=THEME["bg"],
-                               edgecolor=THEME["text"], linewidth=2.5 * scale_factor, zorder=9)
-                    ax.scatter(pt.x, pt.y, s=90 * scale_factor**2, color=THEME["text"], zorder=9.1)
+                    ax.scatter(pt.x, pt.y, s=340 * scale_factor**2 * point_scale**2, facecolor=THEME["bg"],
+                               edgecolor=THEME["text"], linewidth=2.5 * scale_factor * point_scale, zorder=9)
+                    ax.scatter(pt.x, pt.y, s=90 * scale_factor**2 * point_scale**2, color=THEME["text"], zorder=9.1)
                     print(f"✓ Added point marker at ({pt_lat}, {pt_lon})")
             except Exception as e:
                 print(f"⚠ Warning: Could not plot point: {e}")
@@ -1127,14 +1130,14 @@ def create_poster(
             print(f"✓ GPX route rendered ({len(trackpoints)} trackpoints)")
 
     # Layer 3: Gradients (Top and Bottom) — only for the classic full-bleed title layout
-    if show_title and not margin:
+    if show_title and not margin and not no_gradient:
         create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
         create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
 
     # Base font sizes (at 12 inches width)
-    base_main = 72
-    base_sub = 27
-    base_coords = 18
+    base_main = 72 * title_scale
+    base_sub = 27 * title_scale
+    base_coords = 18 * title_scale
     base_attr = 8
 
     # 4. Typography - use custom fonts if provided, otherwise use default FONTS
@@ -1591,6 +1594,26 @@ Examples:
         help=f"Output directory for the poster (default: {POSTERS_DIR})",
     )
     parser.add_argument(
+        "--no-gradient",
+        dest="no_gradient",
+        action="store_true",
+        help="Disable the top/bottom gradient fades while keeping the title block",
+    )
+    parser.add_argument(
+        "--title-scale",
+        dest="title_scale",
+        type=float,
+        default=1.0,
+        help="Multiplier for title/subtitle/coordinate type size (default: 1.0)",
+    )
+    parser.add_argument(
+        "--point-scale",
+        dest="point_scale",
+        type=float,
+        default=1.0,
+        help="Multiplier for --point ring marker size (default: 1.0)",
+    )
+    parser.add_argument(
         "--gpx",
         type=str,
         help="Path to a GPX file to overlay a travel route on the map",
@@ -1725,6 +1748,9 @@ Examples:
                 points=points_data,
                 gpx_path=args.gpx,
                 show_title=not (args.no_title or args.margin),
+                no_gradient=args.no_gradient,
+                title_scale=args.title_scale,
+                point_scale=args.point_scale,
                 margin=args.margin,
                 buildings=args.buildings,
                 mobility=args.mobility,

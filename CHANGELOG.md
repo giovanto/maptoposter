@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed (2026-08-21)
 - **Coordinate footer for western/southern hemispheres** — showed a minus sign together with the hemisphere letter (e.g. `-74.0060° W`); now prints `74.0060° W`
 
+### Added (2026-08-30)
+- **`--no-gradient`**: disables the top and bottom gradient fades while keeping the title block
+- **`--title-scale <f>`**: multiplier for title, subtitle and coordinate type size (default 1.0)
+- **`--point-scale <f>`**: multiplier for the `--point` ring marker (default 1.0)
+- **Theme iterations**: `terracotta_v2`, `midnight_blue_v2`, `neon_cyberpunk_v2`
+
 ### Added
 - **uv package manager support** ([PR #20](https://github.com/originalankur/maptoposter/pull/20))
   - Added `pyproject.toml` with project metadata and dependencies
