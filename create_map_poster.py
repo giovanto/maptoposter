@@ -912,6 +912,7 @@ def create_poster(
     stickers=None,
     sticker_size=None,
     sticker_mm=None,
+    door_mm=None,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -1380,10 +1381,18 @@ def create_poster(
         ax_px_w = ax.get_position().width * fig.get_size_inches()[0] * 300
         target_px = max(16, int(round(ax_px_w * (s_w / win_w))))
         st_fonts = fonts or FONTS
-        font_st = (FontProperties(fname=st_fonts["bold"], size=10 * scale_factor) if st_fonts
-                   else FontProperties(family="monospace", weight="bold", size=10 * scale_factor))
-        for st_lat, st_lon, st_path, st_text in stickers:
+        # Edge-anchor labels share the footer's voice: light weight, small, letter-spaced, muted ink
+        font_st = (FontProperties(fname=st_fonts["light"], size=7 * scale_factor) if st_fonts
+                   else FontProperties(family="monospace", size=7 * scale_factor))
+        for idx, (st_lat, st_lon, st_path, st_text) in enumerate(stickers):
             try:
+                if idx == 0 and door_mm:   # the first sticker is the door; it may have its own paper size (e.g. a photo cutout)
+                    sheet_mm = fig.get_size_inches()[0] * 25.4
+                    s_w = door_mm / (0.78 * sheet_mm) * win_w
+                    target_px = max(16, int(round(ax_px_w * (s_w / win_w))))
+                elif idx == 1 and door_mm:  # back to the mark size for the rest
+                    s_w = sticker_mm / (0.78 * fig.get_size_inches()[0] * 25.4) * win_w if sticker_mm else (sticker_size if sticker_size else 0.08 * win_w)
+                    target_px = max(16, int(round(ax_px_w * (s_w / win_w))))
                 img = _resample_icon(plt.imread(st_path), target_px)
             except Exception as e:
                 print(f"\u26a0 Warning: could not load sticker '{st_path}': {e}")
@@ -1409,7 +1418,7 @@ def create_poster(
                 ax.imshow(img, extent=(x - s_w / 2, x + s_w / 2, y - s_h / 2, y + s_h / 2),
                           zorder=9.6, interpolation="antialiased")
                 if label:
-                    ax.text(x, y - s_h / 2 - 0.012 * win_w, label, color=THEME["text"],
+                    ax.text(x, y - s_h / 2 - 0.012 * win_w, " ".join(label), color=THEME["text"], alpha=0.75,
                             ha="center", va="top", fontproperties=font_st, zorder=10)
                 print(f"\u2713 Sticker '{st_text}' {'in frame' if inside else 'on the edge'}")
             except Exception as e:
@@ -1958,6 +1967,7 @@ Examples:
              "metres (--sticker-size, default 8%% of the frame). Outside the frame it "
              "takes the edge position when --edge-marks is on.",
     )
+    parser.add_argument("--door-mm", dest="door_mm", type=float, default=None, help="Paper size in mm for the FIRST sticker (the door), e.g. a larger photo cutout")
     parser.add_argument("--sticker-mm", dest="sticker_mm", type=float, default=None,
         help="Sticker width in millimetres ON PAPER (relative to the rendered sheet size); overrides --sticker-size. "
              "Keeps discs identical across posters of different scales.")
@@ -2132,6 +2142,7 @@ Examples:
                 stickers=parsed_stickers,
                 sticker_size=args.sticker_size,
                 sticker_mm=args.sticker_mm,
+                door_mm=args.door_mm,
                 margin=args.margin,
                 buildings=args.buildings,
                 mobility=args.mobility,

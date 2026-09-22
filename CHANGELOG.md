@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Transit as two layers**: trams and light rail at full weight; heavy rail, narrow gauge and surface metro (`MAPTOPOSTER_TRANSIT_HEAVY`) thinner and lighter, scale-aware, tunnels excluded. Orange now reads consistently as "rail transport you can see".
 
+- **`--door-mm`**: the first sticker (the door) can take its own paper size, e.g. a larger photo cutout.
+- Edge-anchor labels set in the footer's voice (light, letter-spaced, muted).
+
 ### Fixed (2026-09-22)
 - Feature cache keys (pickle and osmium export) now encode tag values, not just keys; a broadened layer could be served for a narrower request.
 - Polygon layers were reprojected with `project_gdf`, which picks a UTM zone from the layer's own centroid; a layer spanning far west of the frame landed in a different zone than the streets and was painted off-axis. All layers now use the graph's CRS.
