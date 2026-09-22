@@ -913,6 +913,7 @@ def create_poster(
     sticker_size=None,
     sticker_mm=None,
     door_mm=None,
+    edge_label="full",
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -1382,8 +1383,9 @@ def create_poster(
         target_px = max(16, int(round(ax_px_w * (s_w / win_w))))
         st_fonts = fonts or FONTS
         # Edge-anchor labels share the footer's voice: light weight, small, letter-spaced, muted ink
-        font_st = (FontProperties(fname=st_fonts["light"], size=7 * scale_factor) if st_fonts
-                   else FontProperties(family="monospace", size=7 * scale_factor))
+        font_st = (FontProperties(fname=st_fonts["regular"], size=8 * scale_factor) if st_fonts and "regular" in st_fonts
+                   else FontProperties(fname=st_fonts["light"], size=8 * scale_factor) if st_fonts
+                   else FontProperties(family="monospace", size=8 * scale_factor))
         for idx, (st_lat, st_lon, st_path, st_text) in enumerate(stickers):
             try:
                 if idx == 0 and door_mm:   # the first sticker is the door; it may have its own paper size (e.g. a photo cutout)
@@ -1412,14 +1414,25 @@ def create_poster(
                             (win_h / 2 - inset) / abs(vy) if vy else float("inf"))
                     x, y = cx + vx * t, cy + vy * t
                     _, _, ground = pyproj.Geod(ellps="WGS84").inv(point[1], point[0], st_lon, st_lat)
-                    # An edge anchor without its distance reads as "here" when it means "that way"
-                    label = f"{st_text} \u00b7 {ground / 1000:.1f} km" if st_text else f"{ground / 1000:.1f} km"
+                    dist_txt = f"{ground / 1000:.1f} km"
+                    label = {"full": (f"{st_text} \u00b7 {dist_txt}" if st_text else dist_txt),
+                             "distance": dist_txt, "none": ""}.get(edge_label, dist_txt)
+                    # Outward arrow on the frame side of the disc: the icon says what, the arrow says which way
+                    nrm = math.hypot(vx, vy) or 1.0
+                    ux, uy = vx / nrm, vy / nrm
+                    ax_, ay_ = x + ux * (s_w * 0.62), y + uy * (s_w * 0.62)
+                    tri = 0.30 * s_w
+                    px_, py_ = -uy, ux
+                    ax.fill([ax_ + ux * tri, ax_ + px_ * tri * 0.7, ax_ - px_ * tri * 0.7],
+                            [ay_ + uy * tri, ay_ + py_ * tri * 0.7, ay_ - py_ * tri * 0.7],
+                            color="#3F7A45", zorder=9.7, linewidth=0)
                 s_h = s_w * img.shape[0] / img.shape[1]
                 ax.imshow(img, extent=(x - s_w / 2, x + s_w / 2, y - s_h / 2, y + s_h / 2),
                           zorder=9.6, interpolation="antialiased")
                 if label:
-                    ax.text(x, y - s_h / 2 - 0.012 * win_w, " ".join(label), color=THEME["text"], alpha=0.75,
-                            ha="center", va="top", fontproperties=font_st, zorder=10)
+                    ax.text(x, y - s_h / 2 - 0.012 * win_w, " ".join(label), color=THEME["text"], alpha=1.0,
+                            ha="center", va="top", fontproperties=font_st, zorder=10,
+                            bbox=dict(facecolor=THEME["bg"], alpha=0.96, edgecolor=THEME["text"], linewidth=0.4 * scale_factor, boxstyle="round,pad=0.5"))
                 print(f"\u2713 Sticker '{st_text}' {'in frame' if inside else 'on the edge'}")
             except Exception as e:
                 print(f"\u26a0 Warning: could not plot sticker '{st_text}': {e}")
@@ -1967,6 +1980,8 @@ Examples:
              "metres (--sticker-size, default 8%% of the frame). Outside the frame it "
              "takes the edge position when --edge-marks is on.",
     )
+    parser.add_argument("--edge-label", dest="edge_label", choices=["full", "distance", "none"], default="full",
+        help="Text under edge-anchored stickers: name + distance, distance only, or none (arrow only)")
     parser.add_argument("--door-mm", dest="door_mm", type=float, default=None, help="Paper size in mm for the FIRST sticker (the door), e.g. a larger photo cutout")
     parser.add_argument("--sticker-mm", dest="sticker_mm", type=float, default=None,
         help="Sticker width in millimetres ON PAPER (relative to the rendered sheet size); overrides --sticker-size. "
@@ -2143,6 +2158,7 @@ Examples:
                 sticker_size=args.sticker_size,
                 sticker_mm=args.sticker_mm,
                 door_mm=args.door_mm,
+                edge_label=args.edge_label,
                 margin=args.margin,
                 buildings=args.buildings,
                 mobility=args.mobility,
