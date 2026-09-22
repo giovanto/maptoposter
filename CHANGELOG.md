@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Transit as two layers**: trams and light rail at full weight; heavy rail, narrow gauge and surface metro (`MAPTOPOSTER_TRANSIT_HEAVY`) thinner and lighter, scale-aware, tunnels excluded. Orange now reads consistently as "rail transport you can see".
 
 - **Edge anchors** carry an outward arrow and a readable boxed label; `--edge-label full|distance|none`.
+- **Vector PDF output** embeds fonts as TrueType (Type 42) and rasterises stickers at `MAPTOPOSTER_DPI`, so a print shop's RIP gets true outlines at any size.
 - **`--door-mm`**: the first sticker (the door) can take its own paper size, e.g. a larger photo cutout.
 - Edge-anchor labels set in the footer's voice (light, letter-spaced, muted).
 

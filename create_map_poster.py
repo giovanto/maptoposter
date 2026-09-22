@@ -1691,6 +1691,11 @@ def create_poster(
     if fmt == "png":
         save_kwargs["dpi"] = int(os.environ.get("MAPTOPOSTER_DPI", "300"))   # 600 for print masters on a fine press
 
+    if fmt == "pdf":
+        # Print-shop PDF: embed fonts as TrueType (Type 42) so the RIP gets real glyph outlines,
+        # and rasterise embedded images (stickers) at a fixed high resolution.
+        plt.rcParams["pdf.fonttype"] = 42
+        save_kwargs["dpi"] = int(os.environ.get("MAPTOPOSTER_DPI", "600"))
     plt.savefig(output_file, format=fmt, **save_kwargs)
 
     plt.close()
