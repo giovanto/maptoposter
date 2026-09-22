@@ -1430,7 +1430,11 @@ def create_poster(
                 ax.imshow(img, extent=(x - s_w / 2, x + s_w / 2, y - s_h / 2, y + s_h / 2),
                           zorder=9.6, interpolation="antialiased")
                 if label:
-                    ax.text(x, y - s_h / 2 - 0.012 * win_w, " ".join(label), color=THEME["text"], alpha=1.0,
+                    # Keep the label box inside the frame: nudge its anchor inward from a side edge
+                    lx = x
+                    if abs(vx) >= abs(vy):
+                        lx = x - ux * (0.10 * win_w)
+                    ax.text(lx, y - s_h / 2 - 0.012 * win_w, " ".join(label), color=THEME["text"], alpha=1.0,
                             ha="center", va="top", fontproperties=font_st, zorder=10,
                             bbox=dict(facecolor=THEME["bg"], alpha=0.96, edgecolor=THEME["text"], linewidth=0.4 * scale_factor, boxstyle="round,pad=0.5"))
                 print(f"\u2713 Sticker '{st_text}' {'in frame' if inside else 'on the edge'}")
