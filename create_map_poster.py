@@ -66,7 +66,8 @@ TRANSIT_HEAVY = os.environ.get("MAPTOPOSTER_TRANSIT_HEAVY", "rail,narrow_gauge,s
 os.environ.setdefault("OSM_MAX_TMPFILE_SIZE", "8192")
 PBF_PATH = os.environ.get("MAPTOPOSTER_PBF", "")
 if os.environ.get("OVERPASS_URL"):
-    ox.settings.overpass_url = os.environ["OVERPASS_URL"]
+    # osmnx appends /interpreter itself; accept both ".../api" and ".../api/interpreter"
+    ox.settings.overpass_url = os.environ["OVERPASS_URL"].rstrip("/").removesuffix("/interpreter")
     ox.settings.overpass_rate_limit = False  # mirrors don't expose slot status
 
 THEMES_DIR = "themes"
