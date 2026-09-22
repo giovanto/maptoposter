@@ -51,6 +51,16 @@ ox.settings.log_console = False
 
 # Alternate Overpass instance (e.g. https://overpass.kumi.systems/api/interpreter)
 # for when overpass-api.de rate-limits your IP
+if os.environ.get("OVERPASS_TIMEOUT"):
+    # Wide frames with a full network can exceed Overpass' default 180 s
+    ox.settings.requests_timeout = int(os.environ["OVERPASS_TIMEOUT"])
+NETWORK_TYPE = os.environ.get("MAPTOPOSTER_NETWORK", "all")  # all | drive | walk | bike
+# Data source: "overpass" (osmnx -> Overpass, default) or "pbf" (local planet file via osmium + DuckDB;
+# no server, no rate limit, deterministic against a dated extract). MAPTOPOSTER_PBF points at the file.
+DATA_SOURCE = os.environ.get("MAPTOPOSTER_SOURCE", "overpass")
+# GDAL's OSM driver silently drops features once its temp budget (default 100 MB) is exceeded on big frames.
+os.environ.setdefault("OSM_MAX_TMPFILE_SIZE", "8192")
+PBF_PATH = os.environ.get("MAPTOPOSTER_PBF", "")
 if os.environ.get("OVERPASS_URL"):
     ox.settings.overpass_url = os.environ["OVERPASS_URL"]
     ox.settings.overpass_rate_limit = False  # mirrors don't expose slot status
@@ -343,6 +353,9 @@ def get_edge_widths_by_type(g):
     w_secondary = ramp.get("secondary", 0.8)
     w_tertiary = ramp.get("tertiary", 0.6)
     w_default = ramp.get("default", 0.4)
+    # Footways, paths, cycleways, tracks: with network_type='all' these outnumber
+    # streets several to one and, drawn at the default width, read as roads.
+    w_minor = ramp.get("minor", 0.15)
 
     for _u, _v, data in g.edges(data=True):
         highway = data.get('highway', 'unclassified')
@@ -359,6 +372,8 @@ def get_edge_widths_by_type(g):
             width = w_secondary
         elif highway in ["tertiary", "tertiary_link"]:
             width = w_tertiary
+        elif highway in ["footway", "path", "pedestrian", "steps", "cycleway", "track", "bridleway", "corridor"]:
+            width = w_minor
         else:
             width = w_default
 
@@ -458,6 +473,24 @@ def get_coordinates(city, country):
         return (location.latitude, location.longitude)
 
     raise ValueError(f"Could not find coordinates for {city}, {country}")
+
+
+def _resample_icon(icon_img, target_px):
+    """Resample an RGBA icon to target_px wide with PREMULTIPLIED alpha, so the
+    silhouette does not fringe. Returns uint8 RGBA ready for imshow(interpolation="antialiased")."""
+    arr = icon_img
+    if arr.dtype != np.uint8:
+        arr = (np.clip(arr, 0, 1) * 255).astype(np.uint8)
+    if arr.shape[-1] != 4 or arr.shape[1] <= target_px:
+        return arr
+    from PIL import Image as _Image
+    al = arr[..., 3:4].astype(np.float32) / 255.0
+    pm = np.dstack([arr[..., :3].astype(np.float32) * al, arr[..., 3:4].astype(np.float32)]).astype(np.uint8)
+    th = max(16, int(round(target_px * arr.shape[0] / arr.shape[1])))
+    sm = np.asarray(_Image.fromarray(pm, "RGBA").resize((max(16, target_px), th), _Image.LANCZOS)).astype(np.float32)
+    a2 = sm[..., 3:4] / 255.0
+    rgb2 = np.divide(sm[..., :3], np.where(a2 == 0, 1.0, a2))
+    return np.dstack([np.clip(rgb2, 0, 255), sm[..., 3:4]]).astype(np.uint8)
 
 
 def get_crop_limits(g_proj, center_lat_lon, fig, dist):
@@ -646,6 +679,100 @@ def _find_covering_cache(prefix: str, suffix: str, dist: float) -> str | None:
     return f"{prefix}{best}{suffix}"
 
 
+
+# ---------------------------------------------------------------------------
+# PBF backend: frame extracts with osmium, graph via osmnx graph_from_xml,
+# features via DuckDB spatial (GDAL OSM driver). Same return types as the
+# Overpass path, so everything downstream is untouched.
+# ---------------------------------------------------------------------------
+_PBF_WALKBIKE = {"footway", "path", "pedestrian", "steps", "cycleway", "track", "bridleway",
+                 "corridor", "living_street", "service"}
+# GDAL OSM driver (osmconf.ini defaults): which tags are real columns per layer;
+# everything else lives in the hstore-text column other_tags.
+_PBF_COLS = {
+    "multipolygons": {"building", "landuse", "leisure", "natural", "amenity", "place", "tourism", "man_made", "water", "waterway"},
+    "lines": {"highway", "waterway", "railway", "man_made", "barrier", "natural"},
+}
+
+def _pbf_bbox(point, dist):
+    lat, lon = point
+    dlat = dist / 111320.0
+    dlon = dist / (111320.0 * max(0.05, math.cos(math.radians(lat))))
+    return (lon - dlon, lat - dlat, lon + dlon, lat + dlat)   # W,S,E,N
+
+def _pbf_frame(point, dist):
+    """Cut (and cache) the frame extract from the planet file. Seconds per frame; reused forever."""
+    import subprocess
+    if not PBF_PATH or not os.path.exists(PBF_PATH):
+        raise RuntimeError(f"MAPTOPOSTER_PBF not set or missing: '{PBF_PATH}'")
+    w, s_, e, n = _pbf_bbox(point, dist)
+    key = f"frame_{point[0]:.5f}_{point[1]:.5f}_{int(dist)}"
+    os.makedirs("cache/pbf", exist_ok=True)
+    out = f"cache/pbf/{key}.osm.pbf"
+    if not os.path.exists(out):
+        subprocess.run(["osmium", "extract", "--bbox", f"{w},{s_},{e},{n}", "-s", "smart",
+                        "--overwrite", "-o", out, PBF_PATH], check=True, capture_output=True)
+    return out, (w, s_, e, n)
+
+def _pbf_graph(point, dist):
+    import subprocess
+    frame, (w, s_, e, n) = _pbf_frame(point, dist)
+    roads = frame.replace(".osm.pbf", "-roads.osm.pbf")
+    xml = frame.replace(".osm.pbf", "-roads.osm")
+    if not os.path.exists(xml):
+        # only highway ways (plus their nodes); otherwise graph_from_xml turns canals and parcels into edges
+        subprocess.run(["osmium", "tags-filter", "--overwrite", "-o", roads, frame, "w/highway"], check=True, capture_output=True)
+        subprocess.run(["osmium", "cat", "-f", "osm", "--overwrite", "-o", xml, roads], check=True, capture_output=True)
+    g = ox.graph_from_xml(xml, simplify=False, retain_all=True)
+    if NETWORK_TYPE == "drive":
+        drop = [(u, v, k) for u, v, k, d in g.edges(keys=True, data=True)
+                if (d.get("highway")[0] if isinstance(d.get("highway"), list) else d.get("highway")) in _PBF_WALKBIKE]
+        g.remove_edges_from(drop)
+        g.remove_nodes_from([nd for nd, deg in dict(g.degree()).items() if deg == 0])
+    g = ox.truncate.truncate_graph_bbox(g, (w, s_, e, n), truncate_by_edge=True)
+    return ox.simplify_graph(g) if not g.graph.get("simplified") else g
+
+def _pbf_features(point, dist, tags):
+    """Features from the frame extract via osmium (tags-filter + export). Complete and fast; GDAL's OSM
+    driver was dropping most building relations in dense frames (Barcelona: 4.7k of 50k)."""
+    import subprocess, json as _json
+    from shapely.geometry import shape as _shape, box as _box
+    frame, _ = _pbf_frame(point, dist)
+    # osmium tags-filter expressions: ways+relations carrying the requested tags
+    exprs = []
+    for k, v in tags.items():
+        if v is True:
+            exprs.append(f"wr/{k}")
+        else:
+            exprs += [f"wr/{k}={x}" for x in ([v] if isinstance(v, str) else v)]
+    tag_key = "_".join(sorted(tags))
+    sub = frame.replace(".osm.pbf", f"-{tag_key}.osm.pbf")
+    gj = frame.replace(".osm.pbf", f"-{tag_key}.geojsonseq")
+    if not os.path.exists(gj):
+        subprocess.run(["osmium", "tags-filter", "--overwrite", "-o", sub, frame, *exprs], check=True, capture_output=True)
+        subprocess.run(["osmium", "export", "--overwrite", "-f", "geojsonseq", "--geometry-types=linestring,polygon",
+                        "-o", gj, sub], check=True, capture_output=True)
+    geoms = []
+    with open(gj) as fh:
+        for line in fh:
+            line = line.strip().lstrip("\x1e")
+            if not line:
+                continue
+            g = _json.loads(line).get("geometry")
+            if g:
+                geoms.append(_shape(g))
+    if not geoms:
+        return GeoDataFrame(geometry=[], crs="EPSG:4326")
+    gdf = GeoDataFrame(geometry=geoms, crs="EPSG:4326")
+    # Clip to the frame (+10 %): complete relations can span far beyond it. Validate first, explode after.
+    w, s_, e, n = _pbf_bbox(point, dist * 1.1)
+    gdf["geometry"] = gdf.geometry.make_valid()
+    gdf["geometry"] = gdf.geometry.intersection(_box(w, s_, e, n))
+    gdf = gdf[~gdf.geometry.is_empty].explode(index_parts=False)
+    gdf = gdf[gdf.geometry.geom_type.isin(["Polygon", "LineString", "Point"])]
+    return GeoDataFrame(gdf[~gdf.geometry.is_empty].reset_index(drop=True), crs="EPSG:4326")
+
+
 def fetch_graph(point, dist) -> MultiDiGraph | None:
     """
     Fetch street network graph from OpenStreetMap.
@@ -661,13 +788,15 @@ def fetch_graph(point, dist) -> MultiDiGraph | None:
         MultiDiGraph of street network, or None if fetch fails
     """
     lat, lon = point
-    graph = f"graph_{lat}_{lon}_{dist}"
+    src = "pbf_" if DATA_SOURCE == "pbf" else ""
+    net = "" if NETWORK_TYPE == "all" else f"{NETWORK_TYPE}_"   # the network type is part of what was fetched
+    graph = f"{src}{net}graph_{lat}_{lon}_{dist}"
     cached = cache_get(graph)
     if cached is not None:
         print("✓ Using cached street network")
         return cast(MultiDiGraph, cached)
 
-    covering = _find_covering_cache(f"graph_{lat}_{lon}_", "", dist)
+    covering = _find_covering_cache(f"{src}{net}graph_{lat}_{lon}_", "", dist)
     if covering:
         cached = cache_get(covering)
         if cached is not None:
@@ -675,7 +804,7 @@ def fetch_graph(point, dist) -> MultiDiGraph | None:
             return cast(MultiDiGraph, cached)
 
     try:
-        g = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all', truncate_by_edge=True)
+        g = _pbf_graph(point, dist) if DATA_SOURCE == "pbf" else ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type=NETWORK_TYPE, truncate_by_edge=True)
         # Rate limit between requests
         time.sleep(0.5)
         try:
@@ -706,13 +835,14 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
     """
     lat, lon = point
     tag_str = "_".join(tags.keys())
-    features = f"{name}_{lat}_{lon}_{dist}_{tag_str}"
+    src = "pbf_" if DATA_SOURCE == "pbf" else ""
+    features = f"{src}{name}_{lat}_{lon}_{dist}_{tag_str}"
     cached = cache_get(features)
     if cached is not None:
         print(f"✓ Using cached {name}")
         return cast(GeoDataFrame, cached)
 
-    covering = _find_covering_cache(f"{name}_{lat}_{lon}_", f"_{tag_str}", dist)
+    covering = _find_covering_cache(f"{src}{name}_{lat}_{lon}_", f"_{tag_str}", dist)
     if covering:
         cached = cache_get(covering)
         if cached is not None:
@@ -720,11 +850,14 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
             return cast(GeoDataFrame, cached)
 
     try:
-        data = ox.features_from_point(point, tags=tags, dist=dist)
+        data = _pbf_features(point, dist, tags) if DATA_SOURCE == "pbf" else ox.features_from_point(point, tags=tags, dist=dist)
         # Rate limit between requests
         time.sleep(0.3)
         try:
-            cache_set(features, data)
+            if not (DATA_SOURCE == "pbf" and (data is None or len(data) == 0)):
+                cache_set(features, data)
+            else:
+                print(f"  (empty {name} from PBF, not cached)")
         except CacheError as e:
             print(e)
         return data
@@ -764,6 +897,11 @@ def create_poster(
     point_scale=1.0,
     no_attribution=False,
     edge_marks=False,
+    coords_at=None,
+    scalebar=False,
+    stickers=None,
+    sticker_size=None,
+    sticker_mm=None,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -918,20 +1056,16 @@ def create_poster(
         water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not water_polys.empty:
             # Project water features in the same CRS as the graph
-            try:
-                water_polys = ox.projection.project_gdf(water_polys)
-            except Exception:
-                water_polys = water_polys.to_crs(g_proj.graph['crs'])
+            # Always the graph's CRS: auto-UTM by the layer's own centroid can pick a different zone
+            water_polys = water_polys.to_crs(g_proj.graph['crs']) if water_polys.crs else ox.projection.project_gdf(water_polys)
             water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
 
     if rivers is not None and not rivers.empty:
         # Line geometries only: polygon riverbanks are already covered by the water layer
         rivers_lines = rivers[rivers.geometry.type.isin(["LineString", "MultiLineString"])]
         if not rivers_lines.empty:
-            try:
-                rivers_lines = ox.projection.project_gdf(rivers_lines)
-            except Exception:
-                rivers_lines = rivers_lines.to_crs(g_proj.graph['crs'])
+            # Always the graph's CRS: auto-UTM by the layer's own centroid can pick a different zone
+            rivers_lines = rivers_lines.to_crs(g_proj.graph['crs']) if rivers_lines.crs else ox.projection.project_gdf(rivers_lines)
             rivers_lines.plot(ax=ax, color=THEME['water'], linewidth=1.5 * line_scale, zorder=0.5)
 
     if forests is not None and not forests.empty:
@@ -939,10 +1073,8 @@ def create_poster(
         forests_polys = forests[forests.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not forests_polys.empty:
             # Project forest features in the same CRS as the graph
-            try:
-                forests_polys = ox.projection.project_gdf(forests_polys)
-            except Exception:
-                forests_polys = forests_polys.to_crs(g_proj.graph['crs'])
+            # Always the graph's CRS: auto-UTM by the layer's own centroid can pick a different zone
+            forests_polys = forests_polys.to_crs(g_proj.graph['crs']) if forests_polys.crs else ox.projection.project_gdf(forests_polys)
             # Use 'forests' color if in theme, otherwise use parks color
             forest_color = THEME.get('forests', THEME['parks'])
             forests_polys.plot(ax=ax, facecolor=forest_color, edgecolor='none', zorder=0.6)
@@ -952,19 +1084,15 @@ def create_poster(
         parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not parks_polys.empty:
             # Project park features in the same CRS as the graph
-            try:
-                parks_polys = ox.projection.project_gdf(parks_polys)
-            except Exception:
-                parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
+            # Always the graph's CRS: auto-UTM by the layer's own centroid can pick a different zone
+            parks_polys = parks_polys.to_crs(g_proj.graph['crs']) if parks_polys.crs else ox.projection.project_gdf(parks_polys)
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
 
     if building_footprints is not None and not building_footprints.empty:
         bldg_polys = building_footprints[building_footprints.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not bldg_polys.empty:
-            try:
-                bldg_polys = ox.projection.project_gdf(bldg_polys)
-            except Exception:
-                bldg_polys = bldg_polys.to_crs(g_proj.graph['crs'])
+            # Always the graph's CRS: auto-UTM by the layer's own centroid can pick a different zone
+            bldg_polys = bldg_polys.to_crs(g_proj.graph['crs']) if bldg_polys.crs else ox.projection.project_gdf(bldg_polys)
             # Theme 'buildings' color, else a 12% text-into-bg blend for a quiet figure-ground tone
             bldg_color = THEME.get('buildings')
             if not bldg_color:
@@ -1001,10 +1129,8 @@ def create_poster(
     if mobility and transit_rails is not None and not transit_rails.empty:
         rail_lines = transit_rails[transit_rails.geometry.type.isin(["LineString", "MultiLineString"])]
         if not rail_lines.empty:
-            try:
-                rail_lines = ox.projection.project_gdf(rail_lines)
-            except Exception:
-                rail_lines = rail_lines.to_crs(g_proj.graph['crs'])
+            # Always the graph's CRS: auto-UTM by the layer's own centroid can pick a different zone
+            rail_lines = rail_lines.to_crs(g_proj.graph['crs']) if rail_lines.crs else ox.projection.project_gdf(rail_lines)
             rail_lines.plot(ax=ax, color=THEME.get("mode_transit", "#C05B3C"),
                             linewidth=1.8 * line_scale, zorder=2.5, alpha=0.95)
 
@@ -1210,6 +1336,58 @@ def create_poster(
             except Exception as e:
                 print(f"⚠ Warning: Could not plot marker: {e}")
 
+    # Layer 2.6: Stickers, a PNG per location. Inside the frame: drawn centred on the
+    # point with its label below. Outside the frame (with --edge-marks): the sticker
+    # replaces the triangle at the clamped edge position, label carries the distance.
+    if stickers:
+        win_w = crop_xlim[1] - crop_xlim[0]
+        win_h = crop_ylim[1] - crop_ylim[0]
+        cx = (crop_xlim[0] + crop_xlim[1]) / 2
+        cy = (crop_ylim[0] + crop_ylim[1]) / 2
+        if sticker_mm:
+            # Size on PAPER: the map inset spans 78 % of the sheet width, so mm -> ground metres per frame
+            sheet_mm = fig.get_size_inches()[0] * 25.4
+            s_w = sticker_mm / (0.78 * sheet_mm) * win_w
+        else:
+            s_w = sticker_size if sticker_size else 0.08 * win_w
+        ax_px_w = ax.get_position().width * fig.get_size_inches()[0] * 300
+        target_px = max(16, int(round(ax_px_w * (s_w / win_w))))
+        st_fonts = fonts or FONTS
+        font_st = (FontProperties(fname=st_fonts["bold"], size=10 * scale_factor) if st_fonts
+                   else FontProperties(family="monospace", weight="bold", size=10 * scale_factor))
+        for st_lat, st_lon, st_path, st_text in stickers:
+            try:
+                img = _resample_icon(plt.imread(st_path), target_px)
+            except Exception as e:
+                print(f"\u26a0 Warning: could not load sticker '{st_path}': {e}")
+                continue
+            try:
+                p = ox.projection.project_geometry(Point(st_lon, st_lat), crs="EPSG:4326",
+                                                   to_crs=g_proj.graph["crs"])[0]
+                inside = crop_xlim[0] <= p.x <= crop_xlim[1] and crop_ylim[0] <= p.y <= crop_ylim[1]
+                if not inside and not edge_marks:
+                    continue
+                if inside:
+                    x, y, label = p.x, p.y, st_text
+                else:
+                    inset = 0.07 * win_w + s_w / 2
+                    vx, vy = p.x - cx, p.y - cy
+                    t = min((win_w / 2 - inset) / abs(vx) if vx else float("inf"),
+                            (win_h / 2 - inset) / abs(vy) if vy else float("inf"))
+                    x, y = cx + vx * t, cy + vy * t
+                    _, _, ground = pyproj.Geod(ellps="WGS84").inv(point[1], point[0], st_lon, st_lat)
+                    # An edge anchor without its distance reads as "here" when it means "that way"
+                    label = f"{st_text} \u00b7 {ground / 1000:.1f} km" if st_text else f"{ground / 1000:.1f} km"
+                s_h = s_w * img.shape[0] / img.shape[1]
+                ax.imshow(img, extent=(x - s_w / 2, x + s_w / 2, y - s_h / 2, y + s_h / 2),
+                          zorder=9.6, interpolation="antialiased")
+                if label:
+                    ax.text(x, y - s_h / 2 - 0.012 * win_w, label, color=THEME["text"],
+                            ha="center", va="top", fontproperties=font_st, zorder=10)
+                print(f"\u2713 Sticker '{st_text}' {'in frame' if inside else 'on the edge'}")
+            except Exception as e:
+                print(f"\u26a0 Warning: could not plot sticker '{st_text}': {e}")
+
     # Layer 2.7: GPX Route overlay
     if gpx_path:
         trackpoints = parse_gpx(gpx_path)
@@ -1347,6 +1525,9 @@ def create_poster(
         coords_y = 0.05
 
     lat, lon = point
+    if coords_at:
+        lat, lon = coords_at   # footer prints the door, not a recentred frame
+
     lat_hemi = "N" if lat >= 0 else "S"
     lon_hemi = "E" if lon >= 0 else "W"
 
@@ -1406,6 +1587,21 @@ def create_poster(
                 va="bottom",
                 fontproperties=font_attr,
             )
+        if scalebar:
+            # Scale bar in the mat, bottom right: a round length close to a fifth of the frame width
+            # Fixed bar, honest label: the same bar on every poster (a fifth of the map width),
+            # labelled with the distance it spans, so a series at mixed scales reads as one system.
+            win_m = crop_xlim[1] - crop_xlim[0]
+            nice = win_m / 5
+            bar_w = 0.78 / 5
+            x1, y = 0.89, 0.030   # below the coordinate line, on the attribution baseline
+            x0 = x1 - bar_w
+            fig.add_artist(plt.Line2D([x0, x1], [y, y], transform=fig.transFigure, color=THEME["text"], alpha=0.6, linewidth=1.2 * scale_factor))
+            for xx in (x0, x1):
+                fig.add_artist(plt.Line2D([xx, xx], [y - 0.006, y + 0.006], transform=fig.transFigure, color=THEME["text"], alpha=0.6, linewidth=1.2 * scale_factor))
+            label = f"{nice/1000:g} km" if nice >= 1000 else f"{nice:.0f} m"
+            fig.text(x0 - 0.008, y, label, color=THEME["text"], alpha=0.6,
+                     ha="right", va="center", fontproperties=font_attr)
         # Hairline keyline around the map inset
         fig.add_artist(plt.Rectangle(
             (0.11, 0.13), 0.78, 0.78,
@@ -1726,6 +1922,28 @@ Examples:
         ),
     )
     parser.add_argument(
+        "--sticker",
+        dest="stickers",
+        nargs=3,
+        action="append",
+        metavar=("LAT,LON", "PNG", "TEXT"),
+        help="Repeatable: a PNG sticker at a location, with a label. Sized in ground "
+             "metres (--sticker-size, default 8%% of the frame). Outside the frame it "
+             "takes the edge position when --edge-marks is on.",
+    )
+    parser.add_argument("--sticker-mm", dest="sticker_mm", type=float, default=None,
+        help="Sticker width in millimetres ON PAPER (relative to the rendered sheet size); overrides --sticker-size. "
+             "Keeps discs identical across posters of different scales.")
+    parser.add_argument(
+        "--sticker-size", dest="sticker_size", type=float, default=None,
+        help="Sticker width in ground metres (default: 8%% of the frame width)",
+    )
+    parser.add_argument(
+        "--coords-at", dest="coords_at", default=None, metavar="LAT,LON",
+        help="Coordinates printed in the footer (default: frame centre). Use the door when the frame is recentred.",
+    )
+    parser.add_argument("--scalebar", dest="scalebar", action="store_true", help="Draw a scale bar bottom-right in the mat")
+    parser.add_argument(
         "--no-attribution",
         dest="no_attribution",
         action="store_true",
@@ -1851,6 +2069,13 @@ Examples:
         for theme_name in themes_to_generate:
             THEME = load_theme(theme_name)
             output_file = generate_output_filename(args.city, theme_name, args.format)
+            parsed_stickers = []
+            for st in (args.stickers or []):
+                try:
+                    la, lo = (float(v) for v in st[0].split(","))
+                    parsed_stickers.append((la, lo, st[1], st[2]))
+                except ValueError:
+                    print(f"\u26a0 Warning: bad sticker location '{st[0]}', expected LAT,LON")
             create_poster(
                 args.city,
                 args.country,
@@ -1875,6 +2100,11 @@ Examples:
                 point_scale=args.point_scale,
                 no_attribution=args.no_attribution,
                 edge_marks=args.edge_marks,
+                scalebar=args.scalebar,
+                coords_at=tuple(float(v) for v in args.coords_at.split(",")) if args.coords_at else None,
+                stickers=parsed_stickers,
+                sticker_size=args.sticker_size,
+                sticker_mm=args.sticker_mm,
                 margin=args.margin,
                 buildings=args.buildings,
                 mobility=args.mobility,

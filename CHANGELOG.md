@@ -29,6 +29,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--edge-marks`**: a `--mark` outside the viewport is drawn as a direction stone on the frame edge, a triangle pointing at the real bearing plus the label and the true distance in km, instead of being silently clipped. Lets a tight same-scale series reference places far outside the frame.
 - **`--no-attribution`**: omits the OpenStreetMap credit. ODbL still requires attribution for any produced work you publish, distribute or sell; intended for private prints only.
 
+### Added (2026-09-22)
+- **Local PBF data source** (`MAPTOPOSTER_SOURCE=pbf`, `MAPTOPOSTER_PBF=<planet.osm.pbf>`): frames are cut with `osmium extract -s smart`, the street graph built with `osmnx.graph_from_xml` (highway ways only, `MAPTOPOSTER_NETWORK` honoured), features read with `osmium tags-filter` + `osmium export`, clipped to the frame. No Overpass, no rate limits, any frame size; a 7.5 km frame renders in ~15 s. Verified layer-for-layer against Overpass on the same frame (buildings, parks, forests, water within 0.1 %).
+- **`--sticker LAT,LON PNG TEXT`** (repeatable) and **`--sticker-size` / `--sticker-mm`**: per-location image markers, sized in ground metres or in millimetres on the sheet; outside the frame they take the edge position (with `--edge-marks`) and print their distance.
+- **`--scalebar`**: fixed-length bar in the mat (a fifth of the map width) labelled with the distance it spans.
+- **`--coords-at LAT,LON`**: footer coordinates independent of the frame centre (for recentred frames).
+- **`--edge-marks`**, **`--no-attribution`**, **`--network` env**, **`OVERPASS_TIMEOUT`**, **`road_widths.minor`** theme key (footways/paths/cycleways as their own width class).
+- Theme `herbarium_green`: sustainable modes lead in green, cars recede toward paper.
+
+### Fixed (2026-09-22)
+- Polygon layers were reprojected with `project_gdf`, which picks a UTM zone from the layer's own centroid; a layer spanning far west of the frame landed in a different zone than the streets and was painted off-axis. All layers now use the graph's CRS.
+- Graph cache key ignored the network type; a `drive` graph could be served for an `all` request.
+- Icon fringing: icons are resampled with premultiplied alpha and drawn 1:1.
+
 ### Fixed (2026-09-21)
 - **`--icon` fringing**: icons were resampled by `imshow` with unpremultiplied alpha and a lanczos kernel, whose negative lobes ring at a hard silhouette and leave a stippled halo, worst when a large cutout is scaled far down. Icons are now resampled with premultiplied alpha to the exact target pixel size and drawn 1:1.
 
