@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Edge-anchor labels set in the footer's voice (light, letter-spaced, muted).
 
 ### Fixed (2026-09-22)
+- PBF features: `osmium export` was asked for linestrings and polygons together, so every closed way came out twice (once as each); area layers now export polygons only, line layers linestrings only. Counts now match Overpass on the same frame within a few percent.
+- `OVERPASS_URL` accepts both `.../api` and `.../api/interpreter`.
 - Feature cache keys (pickle and osmium export) now encode tag values, not just keys; a broadened layer could be served for a narrower request.
 - Polygon layers were reprojected with `project_gdf`, which picks a UTM zone from the layer's own centroid; a layer spanning far west of the frame landed in a different zone than the streets and was painted off-axis. All layers now use the graph's CRS.
 - Graph cache key ignored the network type; a `drive` graph could be served for an `all` request.

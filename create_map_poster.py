@@ -760,7 +760,11 @@ def _pbf_features(point, dist, tags):
             sub2 = sub.replace(".osm.pbf", "-notunnel.osm.pbf")
             subprocess.run(["osmium", "tags-filter", "--overwrite", "-i", "-o", sub2, sub, "w/tunnel", "w/layer=-1", "w/layer=-2", "w/layer=-3"], check=True, capture_output=True)
             sub = sub2
-        subprocess.run(["osmium", "export", "--overwrite", "-f", "geojsonseq", "--geometry-types=linestring,polygon",
+        # Areas as polygons only, lines as linestrings only: asking for both makes osmium export emit every
+        # closed way twice (once as each), which doubled every area layer.
+        line_layer = "railway" in tags or tags.get("waterway") == "river" or tags.get("natural") == "coastline"
+        gtypes = "linestring" if line_layer else "polygon"
+        subprocess.run(["osmium", "export", "--overwrite", "-f", "geojsonseq", f"--geometry-types={gtypes}",
                         "-o", gj, sub], check=True, capture_output=True)
     geoms = []
     with open(gj) as fh:
