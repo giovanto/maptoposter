@@ -58,6 +58,10 @@ NETWORK_TYPE = os.environ.get("MAPTOPOSTER_NETWORK", "all")  # all | drive | wal
 # Data source: "overpass" (osmnx -> Overpass, default) or "pbf" (local planet file via osmium + DuckDB;
 # no server, no rate limit, deterministic against a dated extract). MAPTOPOSTER_PBF points at the file.
 DATA_SOURCE = os.environ.get("MAPTOPOSTER_SOURCE", "overpass")
+# Transit overlay: which railway= values count as "public transport you can see".
+# MAPTOPOSTER_TRANSIT=tram,light_rail restores the tram-only overlay.
+TRANSIT_RAILWAYS = os.environ.get("MAPTOPOSTER_TRANSIT", "tram,light_rail").split(",")          # street-level, full weight
+TRANSIT_HEAVY = os.environ.get("MAPTOPOSTER_TRANSIT_HEAVY", "rail,narrow_gauge,subway").split(",")  # heavy rail, thinner
 # GDAL's OSM driver silently drops features once its temp budget (default 100 MB) is exceeded on big frames.
 os.environ.setdefault("OSM_MAX_TMPFILE_SIZE", "8192")
 PBF_PATH = os.environ.get("MAPTOPOSTER_PBF", "")
@@ -745,11 +749,16 @@ def _pbf_features(point, dist, tags):
             exprs.append(f"wr/{k}")
         else:
             exprs += [f"wr/{k}={x}" for x in ([v] if isinstance(v, str) else v)]
-    tag_key = "_".join(sorted(tags))
+    import hashlib as _hl2
+    tag_key = "_".join(sorted(tags)) + "-" + _hl2.md5(repr(sorted((k, v if isinstance(v, (str, bool)) else tuple(v)) for k, v in tags.items())).encode()).hexdigest()[:6]
     sub = frame.replace(".osm.pbf", f"-{tag_key}.osm.pbf")
     gj = frame.replace(".osm.pbf", f"-{tag_key}.geojsonseq")
     if not os.path.exists(gj):
         subprocess.run(["osmium", "tags-filter", "--overwrite", "-o", sub, frame, *exprs], check=True, capture_output=True)
+        if "railway" in tags:   # transit is about visible infrastructure: drop tunnels (metros surface where they surface)
+            sub2 = sub.replace(".osm.pbf", "-notunnel.osm.pbf")
+            subprocess.run(["osmium", "tags-filter", "--overwrite", "-i", "-o", sub2, sub, "w/tunnel", "w/layer=-1", "w/layer=-2", "w/layer=-3"], check=True, capture_output=True)
+            sub = sub2
         subprocess.run(["osmium", "export", "--overwrite", "-f", "geojsonseq", "--geometry-types=linestring,polygon",
                         "-o", gj, sub], check=True, capture_output=True)
     geoms = []
@@ -834,7 +843,8 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
         GeoDataFrame of features, or None if fetch fails
     """
     lat, lon = point
-    tag_str = "_".join(tags.keys())
+    import hashlib as _hl
+    tag_str = "_".join(tags.keys()) + "_" + _hl.md5(repr(sorted((k, v if isinstance(v, (str, bool)) else tuple(v)) for k, v in tags.items())).encode()).hexdigest()[:6]
     src = "pbf_" if DATA_SOURCE == "pbf" else ""
     features = f"{src}{name}_{lat}_{lon}_{dist}_{tag_str}"
     cached = cache_get(features)
@@ -1010,13 +1020,20 @@ def create_poster(
 
         # 8. Fetch tram/light-rail lines for the mobility layout
         transit_rails = None
+        transit_heavy = None
         if mobility:
             pbar.set_description("Downloading tram/light-rail lines")
             transit_rails = fetch_features(
                 point,
                 compensated_dist,
-                tags={"railway": ["tram", "light_rail"]},
+                tags={"railway": TRANSIT_RAILWAYS},
                 name="transit_rails",
+            )
+            transit_heavy = fetch_features(
+                point,
+                compensated_dist,
+                tags={"railway": TRANSIT_HEAVY},
+                name="transit_heavy",
             )
             pbar.update(1)
 
@@ -1133,6 +1150,16 @@ def create_poster(
             rail_lines = rail_lines.to_crs(g_proj.graph['crs']) if rail_lines.crs else ox.projection.project_gdf(rail_lines)
             rail_lines.plot(ax=ax, color=THEME.get("mode_transit", "#C05B3C"),
                             linewidth=1.8 * line_scale, zorder=2.5, alpha=0.95)
+    if mobility and transit_heavy is not None and not transit_heavy.empty:
+        heavy = transit_heavy[transit_heavy.geometry.type.isin(["LineString", "MultiLineString"])]
+        if not heavy.empty:
+            heavy = heavy.to_crs(g_proj.graph['crs']) if heavy.crs else ox.projection.project_gdf(heavy)
+            # Heavy rail is infrastructure, trams are street life: same hue, half the weight
+            # Rail corridors bundle 4-6 parallel tracks; keep each thin and light so the bundle stays a whisper
+            # Scale-aware: a lone line at 2.5 km needs ~0.8 to register; a 6-track corridor at 7.5 km fuses above 0.45
+            heavy_w = 0.45 * (7500.0 / max(1.0, crop_xlim[1] - crop_xlim[0])) ** 0.5
+            heavy.plot(ax=ax, color=THEME.get("mode_transit", "#C05B3C"),
+                       linewidth=heavy_w * line_scale, zorder=2.4, alpha=0.55)
 
     # Layer 2.4: Plain ring markers or a custom image icon — for minimal/series layouts
     if points:
