@@ -1192,7 +1192,7 @@ def create_poster(
                         arr = draw_img
                         if arr.dtype != np.uint8:
                             arr = (np.clip(arr, 0, 1) * 255).astype(np.uint8)
-                        ax_px_w = ax.get_position().width * fig.get_size_inches()[0] * 300
+                        ax_px_w = ax.get_position().width * fig.get_size_inches()[0] * int(os.environ.get("MAPTOPOSTER_DPI", "300"))
                         target_px = max(16, int(round(ax_px_w * (w / win_w))))
                         if arr.shape[1] > target_px:
                             from PIL import Image as _Image
@@ -1379,7 +1379,7 @@ def create_poster(
             s_w = sticker_mm / (0.78 * sheet_mm) * win_w
         else:
             s_w = sticker_size if sticker_size else 0.08 * win_w
-        ax_px_w = ax.get_position().width * fig.get_size_inches()[0] * 300
+        ax_px_w = ax.get_position().width * fig.get_size_inches()[0] * int(os.environ.get("MAPTOPOSTER_DPI", "300"))
         target_px = max(16, int(round(ax_px_w * (s_w / win_w))))
         st_fonts = fonts or FONTS
         # Edge-anchor labels share the footer's voice: light weight, small, letter-spaced, muted ink
@@ -1685,7 +1685,7 @@ def create_poster(
 
     # DPI matters mainly for raster formats
     if fmt == "png":
-        save_kwargs["dpi"] = 300
+        save_kwargs["dpi"] = int(os.environ.get("MAPTOPOSTER_DPI", "300"))   # 600 for print masters on a fine press
 
     plt.savefig(output_file, format=fmt, **save_kwargs)
 
